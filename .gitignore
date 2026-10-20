@@ -1,0 +1,16 @@
+node_modules
+.next
+.next-dev
+.next-validation
+.env
+.env.local
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage
+.vercel
+.runtime
+tmp/pdfs/
+*.zip
+*.tsbuildinfo

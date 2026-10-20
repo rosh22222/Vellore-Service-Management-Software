@@ -1,0 +1,340 @@
+import { dateInput, dateBoundary } from "@/lib/business-date";
+import Link from "next/link";
+import { ComplaintPriority, Prisma, ServiceStatus } from "@prisma/client";
+import { db } from "@/lib/db";
+import { requireRoles } from "@/lib/auth";
+import { PageHeader, EmptyState } from "@/components/ui/page";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { SearchForm } from "@/components/ui/search-form";
+import { date, titleCase } from "@/lib/format";
+import { getCachedTechnicianOptions } from "@/lib/cached-lookups";
+
+type Params = {
+  q?: string;
+  status?: string;
+  priority?: string;
+  technician?: string;
+  customer?: string;
+  equipment?: string;
+  assigned?: string;
+  warranty?: string;
+  from?: string;
+  to?: string;
+  page?: string;
+};
+const pageSize = 25;
+
+export default async function ComplaintsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Params>;
+}) {
+  await requireRoles(["ADMIN", "OFFICE_STAFF"]);
+  const params = await searchParams;
+  const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const where: Prisma.ServiceComplaintWhereInput = {};
+
+  if (params.q)
+    where.OR = [
+      { complaintNumber: { contains: params.q, mode: "insensitive" } },
+      { customerComplaint: { contains: params.q, mode: "insensitive" } },
+      { customer: { name: { contains: params.q, mode: "insensitive" } } },
+      { customer: { primaryMobile: { contains: params.q } } },
+      { equipment: { name: { contains: params.q, mode: "insensitive" } } },
+      {
+        equipment: { modelNumber: { contains: params.q, mode: "insensitive" } },
+      },
+      {
+        equipment: {
+          serialNumber: { contains: params.q, mode: "insensitive" },
+        },
+      },
+    ];
+  if (
+    params.status &&
+    Object.values(ServiceStatus).includes(params.status as ServiceStatus)
+  )
+    where.status = params.status as ServiceStatus;
+  if (
+    params.priority &&
+    Object.values(ComplaintPriority).includes(
+      params.priority as ComplaintPriority,
+    )
+  )
+    where.priority = params.priority as ComplaintPriority;
+  if (params.technician) where.currentTechnicianId = params.technician;
+  if (params.assigned === "yes") where.currentTechnicianId = { not: null };
+  if (params.assigned === "no") where.currentTechnicianId = null;
+  if (params.warranty === "under")
+    where.equipment = { warrantyExpiryDate: { gte: today } };
+  if (params.warranty === "out")
+    where.equipment = { warrantyExpiryDate: { lt: today } };
+  if (params.warranty === "unknown")
+    where.equipment = { warrantyExpiryDate: null };
+  if (params.from || params.to) {
+    where.complaintDate = {};
+    if (params.from)
+      where.complaintDate.gte = dateBoundary(params.from);
+    if (params.to)
+      where.complaintDate.lte = dateBoundary(params.to, true);
+  }
+
+  const [rows, total, technicians] = await Promise.all([
+    db.serviceComplaint.findMany({
+      where,
+      include: { customer: true, equipment: true, currentTechnician: true },
+      orderBy: { complaintDate: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.serviceComplaint.count({ where }),
+    getCachedTechnicianOptions(),
+  ]);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const preservedSearchFields = Object.fromEntries(
+    Object.entries(params).filter(
+      (entry): entry is [string, string] =>
+        entry[0] !== "q" && entry[0] !== "page" && Boolean(entry[1]),
+    ),
+  );
+  const searchResetQuery = new URLSearchParams(preservedSearchFields).toString();
+  const searchResetHref = searchResetQuery
+    ? `/complaints?${searchResetQuery}`
+    : "/complaints";
+  const pageHref = (target: number) => {
+    const query = new URLSearchParams(
+      Object.entries(params).filter((entry): entry is [string, string] =>
+        Boolean(entry[1]),
+      ),
+    );
+    query.set("page", String(target));
+    return `/complaints?${query.toString()}`;
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Service Complaints"
+        description="Track every registered complaint from receipt to completion."
+        actions={
+          <Link
+            href="/complaints/new"
+            className="rounded-xl bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-primary-hover"
+          >
+            + New Complaint
+          </Link>
+        }
+      />
+      <SearchForm
+        query={params.q ?? ""}
+        label="Search service complaints"
+        placeholder="Search complaint, customer, phone, equipment, model or serial..."
+        resetHref={searchResetHref}
+        hiddenFields={preservedSearchFields}
+      />
+      <form className="mb-4 grid gap-2 rounded-2xl border border-brand-border bg-white p-4 md:grid-cols-2 xl:grid-cols-5">
+        {params.q && <input type="hidden" name="q" value={params.q} />}
+        <SelectFilter
+          name="status"
+          value={params.status}
+          label="All statuses"
+          options={Object.values(ServiceStatus).map((value) => [
+            value,
+            titleCase(value),
+          ])}
+        />
+        <SelectFilter
+          name="priority"
+          value={params.priority}
+          label="All priorities"
+          options={Object.values(ComplaintPriority).map((value) => [
+            value,
+            titleCase(value),
+          ])}
+        />
+        <SelectFilter
+          name="technician"
+          value={params.technician}
+          label="All technicians"
+          options={technicians.map((item) => [item.id, item.name])}
+        />
+        <SelectFilter
+          name="assigned"
+          value={params.assigned}
+          label="Assigned & unassigned"
+          options={[
+            ["yes", "Assigned"],
+            ["no", "Unassigned"],
+          ]}
+        />
+        <SelectFilter
+          name="warranty"
+          value={params.warranty}
+          label="All warranty states"
+          options={[
+            ["under", "Under warranty"],
+            ["out", "Out of warranty"],
+            ["unknown", "Unknown warranty"],
+          ]}
+        />
+        <input
+          name="from"
+          type="date"
+          defaultValue={params.from}
+          aria-label="From date"
+          className="rounded-xl border border-brand-input px-3 py-2 text-sm outline-none hover:border-brand-primary focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/10"
+        />
+        <input
+          name="to"
+          type="date"
+          defaultValue={params.to}
+          aria-label="To date"
+          className="rounded-xl border border-brand-input px-3 py-2 text-sm outline-none hover:border-brand-primary focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/10"
+        />
+        <div className="flex gap-2 xl:col-span-5">
+          <button className="rounded-xl bg-brand-primary px-4 py-2 text-sm font-semibold text-white hover:bg-brand-primary-hover">
+            Apply Filters
+          </button>
+          <Link
+            href="/complaints"
+            className="rounded-xl border border-brand-border bg-white px-4 py-2 text-sm font-semibold text-brand-ink hover:bg-brand-subtle"
+          >
+            Clear
+          </Link>
+        </div>
+      </form>
+      {rows.length ? (
+        <Card>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Complaint #</th>
+                  <th>Date</th>
+                  <th>Customer / Phone</th>
+                  <th>Equipment</th>
+                  <th>Problem</th>
+                  <th>Technician</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Age</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((complaint) => {
+                  const age = Math.max(
+                    0,
+                    Math.floor(
+                      (Date.now() - complaint.complaintDate.getTime()) /
+                        86400000,
+                    ),
+                  );
+                  return (
+                    <tr key={complaint.id}>
+                      <td>
+                        <Link
+                          className="link"
+                          href={`/complaints/${complaint.id}`}
+                        >
+                          {complaint.complaintNumber}
+                        </Link>
+                      </td>
+                      <td>{date(complaint.complaintDate)}</td>
+                      <td>
+                        <div className="font-semibold">
+                          {complaint.customer.name}
+                        </div>
+                        <div className="text-xs text-brand-muted">
+                          {complaint.customer.primaryMobile}
+                        </div>
+                      </td>
+                      <td>
+                        {complaint.equipment?.name ?? "—"}
+                        <div className="text-xs text-brand-muted">
+                          {complaint.equipment?.modelNumber ?? ""}
+                        </div>
+                      </td>
+                      <td className="max-w-sm">
+                        {complaint.customerComplaint}
+                      </td>
+                      <td>
+                        {complaint.currentTechnician?.name ?? "Unassigned"}
+                      </td>
+                      <td>
+                        <Badge value={complaint.priority} />
+                      </td>
+                      <td>
+                        <Badge value={complaint.status} />
+                      </td>
+                      <td>{age}d</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : (
+        <EmptyState
+          title="No complaints found"
+          text="No complaints match the selected filters."
+        />
+      )}
+      <div className="mt-4 flex items-center justify-between text-sm text-brand-muted">
+        <span>
+          {total} complaint(s) • Page {page} of {pages}
+        </span>
+        <div className="flex gap-2">
+          {page > 1 && (
+            <Link
+              className="rounded-lg border border-brand-border bg-white px-3 py-2 font-semibold text-brand-ink hover:bg-brand-subtle"
+              href={pageHref(page - 1)}
+            >
+              Previous
+            </Link>
+          )}
+          {page < pages && (
+            <Link
+              className="rounded-lg border border-brand-border bg-white px-3 py-2 font-semibold text-brand-ink hover:bg-brand-subtle"
+              href={pageHref(page + 1)}
+            >
+              Next
+            </Link>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SelectFilter({
+  name,
+  value,
+  label,
+  options,
+}: {
+  name: string;
+  value?: string;
+  label: string;
+  options: string[][];
+}) {
+  return (
+    <select
+      name={name}
+      defaultValue={value ?? ""}
+      className="rounded-xl border border-brand-input px-3 py-2 text-sm outline-none hover:border-brand-primary focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/10"
+    >
+      <option value="">{label}</option>
+      {options.map(([optionValue, optionLabel]) => (
+        <option key={optionValue} value={optionValue}>
+          {optionLabel}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+

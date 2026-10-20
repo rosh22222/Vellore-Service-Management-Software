@@ -1,0 +1,492 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  OFFICE_STAFF
+  TECHNICIAN
+}
+
+enum CustomerType {
+  GYM
+  HOME_CUSTOMER
+  HOTEL
+  APARTMENT
+  INSTITUTION
+  OTHER
+}
+
+enum EquipmentStatus {
+  ACTIVE
+  INACTIVE
+  UNDER_REPAIR
+  RETIRED
+}
+
+enum ComplaintPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ComplaintSource {
+  PHONE
+  WALK_IN
+  EMAIL
+  OTHER
+}
+
+enum ServiceStatus {
+  COMPLAINT_RECEIVED
+  UNASSIGNED
+  TECHNICIAN_ASSIGNED
+  TECHNICIAN_ACCEPTED
+  TECHNICIAN_VISITING
+  INSPECTION_STARTED
+  PROBLEM_DIAGNOSED
+  REPAIR_IN_PROGRESS
+  WAITING_FOR_SPARE_PART
+  WAITING_FOR_CUSTOMER_APPROVAL
+  SERVICE_COMPLETED
+  CLOSED
+  CANCELLED
+}
+
+enum TechnicianStatus {
+  AVAILABLE
+  BUSY
+  ON_LEAVE
+  INACTIVE
+}
+
+enum WarrantyStatus {
+  UNDER_WARRANTY
+  OUT_OF_WARRANTY
+  UNKNOWN
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  CHEQUE
+  OTHER
+}
+
+enum QuantityUnit {
+  UNIT
+  KG
+}
+
+model User {
+  id                  String                 @id @default(cuid())
+  name                String
+    username            String                 @unique
+    email               String?                @unique
+    specialization      String?
+    passwordHash        String
+  role                UserRole
+  isActive            Boolean                @default(true)
+  canAssignTechnician Boolean                @default(false)
+  canGenerateBills    Boolean                @default(false)
+  technician          Technician?
+  createdComplaints   ServiceComplaint[]     @relation("ComplaintCreatedBy")
+  createdBillDetails  BillDetail[]           @relation("BillDetailCreatedBy")
+  serviceCollections  ServiceCollection[]    @relation("ServiceCollectionCollectedBy")
+  assignmentsMade     ServiceAssignment[]    @relation("AssignedBy")
+  statusChanges       ServiceStatusHistory[] @relation("StatusChangedBy")
+  workLogs            ServiceWorkLog[]       @relation("WorkLogCreatedBy")
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+}
+
+model Customer {
+  id              String              @id @default(cuid())
+  customerCode    String              @unique
+  type            CustomerType
+  name            String
+  primaryMobile   String
+  alternateMobile String?
+  email           String?
+  address         String
+  city            String
+  state           String
+  pinCode         String?
+  gstNumber       String?
+  notes           String?
+  equipment       CustomerEquipment[]
+  billDetails     BillDetail[]
+  complaints      ServiceComplaint[]
+  serviceRecords  ServiceRecord[]
+  serviceCollections ServiceCollection[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([name])
+  @@index([primaryMobile])
+  @@index([city])
+}
+
+model CustomerEquipment {
+  id                 String             @id @default(cuid())
+  equipmentCode      String             @unique
+  customerId         String
+  customer           Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  name               String
+  category           String?
+  brand              String?
+  modelNumber        String?
+  serialNumber       String?            @unique
+  purchaseDate       DateTime?
+  invoiceNumber      String?
+  installationDate   DateTime?
+  warrantyStartDate  DateTime?
+  warrantyExpiryDate DateTime?
+  warrantyDuration   String?
+  locationBranch     String?
+  status             EquipmentStatus    @default(ACTIVE)
+  notes              String?
+  photoUrl           String?
+  complaints         ServiceComplaint[]
+  billDetailItems    BillDetailItem[]
+  billDetailUnits    BillDetailItemUnit[]
+  serviceRecords     ServiceRecord[]
+  serviceCollections ServiceCollection[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([customerId])
+  @@index([name])
+  @@index([modelNumber])
+}
+
+model Technician {
+  id                String              @id @default(cuid())
+  technicianCode    String              @unique
+  name              String
+  mobile            String
+  email             String?
+  address           String?
+  skills            String?
+  specialization    String?
+  joiningDate       DateTime?
+  isActive          Boolean             @default(true)
+  status            TechnicianStatus    @default(AVAILABLE)
+  userId            String?             @unique
+  user              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  currentComplaints ServiceComplaint[]  @relation("CurrentTechnician")
+  assignments       ServiceAssignment[]
+  serviceRecords    ServiceRecord[]
+  serviceCollections ServiceCollection[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([name])
+  @@index([status])
+}
+
+model ServiceComplaint {
+  id                       String                 @id @default(cuid())
+  complaintNumber          String                 @unique
+  complaintDate            DateTime               @default(now())
+  customerId               String
+  customer                 Customer               @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  equipmentId              String?
+  equipment                CustomerEquipment?     @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+  customerComplaint        String
+  complaintCategory        String?
+  priority                 ComplaintPriority      @default(NORMAL)
+  preferredVisitDate       DateTime?
+  notes                    String?
+  source                   ComplaintSource        @default(PHONE)
+  status                   ServiceStatus          @default(UNASSIGNED)
+  currentTechnicianId      String?
+  currentTechnician        Technician?            @relation("CurrentTechnician", fields: [currentTechnicianId], references: [id], onDelete: SetNull)
+  createdById              String
+  createdBy                User                   @relation("ComplaintCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  repeatIssueDetected      Boolean                @default(false)
+  repeatReferenceServiceId String?
+  noPartsUsed              Boolean                @default(false)
+  closedAt                 DateTime?
+  assignments              ServiceAssignment[]
+  inspection               ServiceInspection?
+  workLogs                 ServiceWorkLog[]
+  statusHistory            ServiceStatusHistory[]
+  parts                    ServicePart[]
+  serviceRecord            ServiceRecord?
+  serviceCollections       ServiceCollection[]
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+
+  @@index([customerId])
+  @@index([equipmentId])
+  @@index([status])
+  @@index([priority])
+  @@index([currentTechnicianId])
+  @@index([complaintDate])
+}
+
+model ServiceAssignment {
+  id           String           @id @default(cuid())
+  complaintId  String
+  complaint    ServiceComplaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  technicianId String
+  technician   Technician       @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  assignedById String
+  assignedBy   User             @relation("AssignedBy", fields: [assignedById], references: [id], onDelete: Restrict)
+  assignedAt   DateTime         @default(now())
+  unassignedAt DateTime?
+  isActive     Boolean          @default(true)
+  reason       String?
+  endedReason  String?
+
+  @@index([complaintId, isActive])
+  @@index([technicianId, assignedAt])
+}
+
+model ServiceInspection {
+  id              String           @id @default(cuid())
+  complaintId     String           @unique
+  complaint       ServiceComplaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  findings        String
+  actualProblem   String
+  technicianNotes String?
+  inspectedAt     DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model ServiceWorkLog {
+  id          String           @id @default(cuid())
+  complaintId String
+  complaint   ServiceComplaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  workDone    String
+  notes       String?
+  createdById String
+  createdBy   User             @relation("WorkLogCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+
+  @@index([complaintId, createdAt])
+}
+
+model ServiceStatusHistory {
+  id             String           @id @default(cuid())
+  complaintId    String
+  complaint      ServiceComplaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  previousStatus ServiceStatus?
+  newStatus      ServiceStatus
+  changedById    String
+  changedBy      User             @relation("StatusChangedBy", fields: [changedById], references: [id], onDelete: Restrict)
+  notes          String?
+  changedAt      DateTime         @default(now())
+
+  @@index([complaintId, changedAt])
+}
+
+model SparePart {
+  id           String        @id @default(cuid())
+  partCode     String        @unique
+  name         String
+  category     String?
+  unitPrice    Decimal       @db.Decimal(12, 2)
+  stockQty     Decimal       @default(0) @db.Decimal(12, 2)
+  reorderLevel Decimal       @default(0) @db.Decimal(12, 2)
+  isActive     Boolean       @default(true)
+  serviceParts ServicePart[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([name])
+}
+
+model Brand {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([isActive])
+}
+
+model ServicePart {
+  id                 String           @id @default(cuid())
+  complaintId        String
+  complaint          ServiceComplaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  sparePartId        String?
+  sparePart          SparePart?       @relation(fields: [sparePartId], references: [id], onDelete: SetNull)
+  serviceRecordId    String?
+  serviceRecord      ServiceRecord?   @relation(fields: [serviceRecordId], references: [id], onDelete: SetNull)
+  partName           String
+  partCode           String?
+  quantity           Decimal          @db.Decimal(12, 2)
+  unitPrice          Decimal          @db.Decimal(12, 2)
+  amount             Decimal          @db.Decimal(12, 2)
+  warrantyApplicable Boolean          @default(false)
+  oldPartReturned    Boolean          @default(false)
+  remarks            String?
+  createdAt          DateTime         @default(now())
+
+  @@index([complaintId])
+}
+
+model BillDetail {
+  id          String           @id @default(cuid())
+  billNumber  String           @unique
+  billDate    DateTime
+  customerId  String
+  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdById String
+  createdBy   User             @relation("BillDetailCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  notes       String?
+  total       Decimal          @default(0) @db.Decimal(12, 2)
+  items       BillDetailItem[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([customerId])
+  @@index([billDate])
+}
+
+model BillDetailItem {
+  id                 String             @id @default(cuid())
+  billDetailId       String
+  billDetail         BillDetail         @relation(fields: [billDetailId], references: [id], onDelete: Cascade)
+  equipmentId        String?
+  equipment          CustomerEquipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  units              BillDetailItemUnit[]
+  itemName           String
+  category           String?
+  brand              String?
+  modelNumber        String?
+  serialNumber       String?
+  quantity           Decimal            @default(1) @db.Decimal(12, 2)
+  quantityUnit       QuantityUnit       @default(UNIT)
+  unitPrice          Decimal            @default(0) @db.Decimal(12, 2)
+  amount             Decimal            @default(0) @db.Decimal(12, 2)
+  warrantyStartDate  DateTime?
+  warrantyExpiryDate DateTime?
+  warrantyDuration   String?
+  notes              String?
+  createdAt          DateTime           @default(now())
+
+  @@index([billDetailId])
+  @@index([equipmentId])
+  @@index([itemName])
+  @@index([serialNumber])
+}
+
+// One purchased line can contain several independently serviced machines.
+// BillDetailItem.equipmentId remains the first unit for legacy compatibility.
+// A Kg purchase has one link for the whole weight-based product, not one per Kg.
+model BillDetailItemUnit {
+  id               String            @id @default(cuid())
+  billDetailItemId String
+  billDetailItem   BillDetailItem    @relation(fields: [billDetailItemId], references: [id], onDelete: Cascade)
+  equipmentId      String
+  equipment        CustomerEquipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+  unitNumber       Int
+
+  @@unique([billDetailItemId, unitNumber])
+  @@unique([billDetailItemId, equipmentId])
+  @@index([equipmentId])
+}
+
+model ServiceRecord {
+  id                      String             @id @default(cuid())
+  serviceNumber           String             @unique
+  complaintId             String             @unique
+  complaint               ServiceComplaint   @relation(fields: [complaintId], references: [id], onDelete: Restrict)
+  customerId              String
+  customer                Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  equipmentId             String?
+  equipment               CustomerEquipment? @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+  technicianId            String?
+  technician              Technician?        @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  serviceDate             DateTime
+  complaintReported       String
+  problemFound            String
+  workDone                String
+  partsSummary            String
+  technicianNameSnapshot  String?
+  customerNameSnapshot    String
+  customerPhoneSnapshot   String
+  customerAddressSnapshot String
+  equipmentNameSnapshot   String?
+  equipmentBrandSnapshot  String?
+  modelSnapshot           String?
+  serialSnapshot          String?
+  warrantyExpirySnapshot  DateTime?
+  warrantyStatus          WarrantyStatus
+  notes                   String?
+  completionNotes         String?
+  charges                 Decimal            @default(0) @db.Decimal(12, 2)
+  parts                   ServicePart[]
+  collections             ServiceCollection[]
+  createdAt               DateTime           @default(now())
+
+  @@index([customerId, serviceDate])
+  @@index([equipmentId, serviceDate])
+  @@index([technicianId, serviceDate])
+}
+
+model ServiceCollection {
+  id               String             @id @default(cuid())
+  collectionNumber String             @unique
+  serviceRecordId  String
+  serviceRecord    ServiceRecord      @relation(fields: [serviceRecordId], references: [id], onDelete: Restrict)
+  complaintId      String
+  complaint        ServiceComplaint   @relation(fields: [complaintId], references: [id], onDelete: Restrict)
+  customerId       String
+  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  equipmentId      String?
+  equipment        CustomerEquipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  technicianId     String?
+  technician       Technician?        @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  collectedById    String
+  collectedBy      User               @relation("ServiceCollectionCollectedBy", fields: [collectedById], references: [id], onDelete: Restrict)
+  amount           Decimal            @db.Decimal(12, 2)
+  paymentMode      PaymentMode
+  collectedAt      DateTime           @default(now())
+  receivedFrom     String?
+  notes            String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([serviceRecordId])
+  @@index([complaintId])
+  @@index([customerId])
+  @@index([technicianId])
+  @@index([collectedById])
+  @@index([collectedAt])
+}
+
+model CompanySetting {
+  id             String   @id @default("company")
+  companyName    String   @default("VELLORE FITNESS EQUIPMENTS")
+  address        String?
+  phone          String?
+  email          String?
+  gstNumber      String?
+  website        String?
+  logoUrl        String?
+  primaryColor   String   @default("#0f172a")
+  secondaryColor String   @default("#f97316")
+  updatedAt      DateTime @updatedAt
+}
+
+model DocumentSequence {
+  key       String   @id
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}

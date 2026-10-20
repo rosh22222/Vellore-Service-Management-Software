@@ -1,0 +1,12 @@
+node_modules
+.next
+.next-dev
+.next-validation
+.runtime
+tmp/pdfs/
+.git
+.env
+.env.*
+*.zip
+*.log
+*.tsbuildinfo
