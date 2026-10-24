@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
+    "postinstall": "node scripts/db-command.mjs generate",
+    "prebuild": "npm run db:generate",
     "build": "next build",
     "build:full": "npm run db:generate && next build",
     "start": "next start",
@@ -15,7 +17,9 @@
     "db:studio": "node scripts/db-command.mjs studio",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:core": "node scripts/verify-core.mjs",
+    "test:core:run": "node scripts/run-core-validation.mjs",
     "test:live-smoke": "node scripts/verify-live-smoke.mjs",
+    "test:live-smoke:run": "node scripts/run-live-smoke.mjs",
     "test:migrations": "node scripts/verify-migrations.mjs",
     "test:bill-machines": "node --import tsx scripts/verify-bill-machines.ts",
     "db:local:start": "powershell -ExecutionPolicy Bypass -File scripts/local-postgres.ps1 start",
@@ -27,16 +31,16 @@
     "@prisma/client": "^6.19.0",
     "@react-pdf/renderer": "^4.3.0",
     "bcryptjs": "^2.4.3",
+    "countrycitystatejson": "^26.9.2802",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.468.0",
     "next": "15.5.28",
     "next-auth": "^4.24.11",
     "react": "19.1.1",
-    "react-dom": "19.1.1",
-    "zod": "^3.24.2"
+    "react-dom": "19.1.1"
   },
   "engines": {
-    "node": "22.x"
+    "node": "22.x || 24.x"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

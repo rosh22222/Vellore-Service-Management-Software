@@ -14,7 +14,10 @@ const maintenanceUrl = new URL(url); maintenanceUrl.pathname = "/postgres";
 const maintenance = new PrismaClient({ datasourceUrl: maintenanceUrl.toString() });
 let created = false, db;
 try {
-  await maintenance.$executeRawUnsafe(`CREATE DATABASE "${name}"`);
+  // Build the disposable database from PostgreSQL's pristine template. This
+  // keeps migration verification independent of any objects/extensions (or
+  // damage) left in the machine's normal template1 database.
+  await maintenance.$executeRawUnsafe(`CREATE DATABASE "${name}" TEMPLATE template0`);
   created = true;
   url.pathname = `/${name}`;
   const env = { ...process.env, DATABASE_URL: url.toString(), NODE_ENV: "production", VFE_ADMIN_PASSWORD: randomUUID() };

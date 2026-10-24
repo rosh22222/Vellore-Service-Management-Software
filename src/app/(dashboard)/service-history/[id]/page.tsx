@@ -50,13 +50,21 @@ export default async function ServiceRecordDetail({
     const hasActiveEquipmentJob = record.equipmentId
       ? await db.serviceComplaint.count({
           where: {
-            currentTechnicianId: user.technicianId ?? "__none__",
+            assignments: {
+              some: {
+                technicianId: user.technicianId ?? "__none__",
+                isActive: true,
+              },
+            },
             equipmentId: record.equipmentId,
             status: { notIn: terminalStatuses },
           },
         })
       : 0;
-    if (record.technicianId !== user.technicianId && !hasActiveEquipmentJob)
+    const wasAssigned = record.complaint.assignments.some(
+      (assignment) => assignment.technicianId === user.technicianId,
+    );
+    if (!wasAssigned && !hasActiveEquipmentJob)
       notFound();
   }
   const collected = record.collections.reduce(
@@ -65,6 +73,7 @@ export default async function ServiceRecordDetail({
   );
   const totalCharges = Number(record.charges);
   const balance = Math.max(0, totalCharges - collected);
+  const assignmentSummary = summarizeAssignments(record.complaint.assignments);
 
   return (
     <>
@@ -129,7 +138,11 @@ export default async function ServiceRecordDetail({
           <Data label="Parts Replaced" value={record.partsSummary} />
           <Data
             label="Technician"
-            value={record.technicianNameSnapshot ?? record.technician?.name}
+            value={
+              assignmentSummary.technicians ||
+              record.technicianNameSnapshot ||
+              record.technician?.name
+            }
           />
           <div>
             <div className="label">Service Amount</div>
@@ -205,16 +218,20 @@ export default async function ServiceRecordDetail({
               </tr>
             </thead>
             <tbody>
-              {record.complaint.assignments.map((assignment) => (
-                <tr key={assignment.id}>
-                  <td>{assignment.technician.name}</td>
-                  <td>{assignment.assignedBy.name}</td>
-                  <td>{date(assignment.assignedAt, true)}</td>
-                  <td>{date(assignment.unassignedAt, true)}</td>
-                  <td>{assignment.reason ?? "—"}</td>
-                  <td>{assignment.endedReason ?? "—"}</td>
+              {record.complaint.assignments.length ? (
+                <tr>
+                  <td className="font-semibold">{assignmentSummary.technicians}</td>
+                  <td>{assignmentSummary.assignedBy}</td>
+                  <td>{assignmentSummary.assignedAt}</td>
+                  <td>{assignmentSummary.endedAt}</td>
+                  <td>{assignmentSummary.notes}</td>
+                  <td>{assignmentSummary.endedReasons}</td>
                 </tr>
-              ))}
+              ) : (
+                <tr>
+                  <td colSpan={6}>No technician assignment history.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -242,6 +259,38 @@ export default async function ServiceRecordDetail({
       </Card>
     </>
   );
+}
+
+function summarizeAssignments(
+  assignments: Array<{
+    technician: { name: string };
+    assignedBy: { name: string };
+    assignedAt: Date;
+    unassignedAt: Date | null;
+    reason: string | null;
+    endedReason: string | null;
+  }>,
+) {
+  const join = (values: Array<string | null | undefined>, separator = " / ") => {
+    const unique = Array.from(
+      new Set(values.filter((value): value is string => Boolean(value))),
+    );
+    return unique.join(separator);
+  };
+  return {
+    technicians: join(assignments.map((item) => item.technician.name), " & "),
+    assignedBy: join(assignments.map((item) => item.assignedBy.name), " & ") || "—",
+    assignedAt:
+      join(assignments.map((item) => date(item.assignedAt, true))) || "—",
+    endedAt:
+      join(
+        assignments
+          .filter((item) => item.unassignedAt)
+          .map((item) => date(item.unassignedAt, true)),
+      ) || "—",
+    notes: join(assignments.map((item) => item.reason)) || "—",
+    endedReasons: join(assignments.map((item) => item.endedReason)) || "—",
+  };
 }
 
 function MoneyBox({

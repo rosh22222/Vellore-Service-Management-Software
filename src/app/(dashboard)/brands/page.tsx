@@ -11,6 +11,8 @@ import { db } from "@/lib/db";
 import { PageHeader } from "@/components/ui/page";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { ActionFeedbackNotice } from "@/components/action-feedback-notice";
 
 function StatusPill({ active }: { active: boolean }) {
   return (
@@ -45,6 +47,7 @@ export default async function BrandsPage() {
           action={createBrand}
           successMessage="Brand Added"
           successDuration={3000}
+          feedbackChannel="brands"
           resetOnSuccess
           className="grid gap-4 lg:grid-cols-[1fr_auto]"
         >
@@ -63,6 +66,7 @@ export default async function BrandsPage() {
             Add Brand
           </Button>
         </ActionForm>
+        <ActionFeedbackNotice channel="brands" />
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-brand-border bg-white shadow-panel">
@@ -112,7 +116,11 @@ export default async function BrandsPage() {
                   </td>
                   <td style={{ textAlign: "center", verticalAlign: "middle" }}>
                     <div className="flex justify-center gap-3">
-                      <ActionForm action={toggleBrand.bind(null, brand.id)}>
+                      <ActionForm
+                        action={toggleBrand.bind(null, brand.id)}
+                        successMessage={brand.isActive ? "Brand Deactivated" : "Brand Activated"}
+                        feedbackChannel="brands"
+                      >
                         <Button
                           variant="secondary"
                           className="px-5"
@@ -121,15 +129,19 @@ export default async function BrandsPage() {
                           {brand.isActive ? "Deactivate" : "Activate"}
                         </Button>
                       </ActionForm>
-                      <ActionForm action={deleteBrand.bind(null, brand.id)}>
-                        <Button
-                          variant="danger"
-                          className="px-5"
+                      <ActionForm
+                        action={deleteBrand.bind(null, brand.id)}
+                        successMessage="Brand Deleted"
+                        feedbackChannel="brands"
+                      >
+                        <ConfirmSubmitButton
+                          message={`Delete brand ${brand.name}? This action cannot be undone.`}
+                          className="border border-rose-200 bg-white px-5 text-rose-700 hover:bg-rose-50"
                           loadingText="Deleting..."
                         >
                           <Trash2 size={17} />
                           Delete
-                        </Button>
+                        </ConfirmSubmitButton>
                       </ActionForm>
                     </div>
                   </td>

@@ -32,6 +32,7 @@ type ReportSummary = {
 };
 
 type TechnicianReportRow = {
+  id: string;
   name: string;
   count: number;
   pendingCount: number;
@@ -39,6 +40,7 @@ type TechnicianReportRow = {
 };
 
 type FrequentEquipmentRow = {
+  id: string;
   label: string;
   value: number;
   hint: string;
@@ -79,19 +81,28 @@ export default async function ReportsPage({
         complaintDate: { gte: start, lte: end },
         status: { notIn: closedStatuses },
       },
-      include: { customer: true, equipment: true, currentTechnician: true },
+      include: {
+        customer: true,
+        equipment: true,
+        assignments: {
+          where: { isActive: true },
+          include: { technician: true },
+          orderBy: { assignedAt: "asc" },
+        },
+      },
       orderBy: [{ priority: "desc" }, { complaintDate: "asc" }],
       take: 100,
     }),
     db.$queryRaw<FrequentEquipmentRow[]>`SELECT
+      e."id" AS "id",
       e."name" AS "label",
       count(*)::int AS "value",
-      c."name" AS "hint"
+      concat(c."name", ' • ', e."equipmentCode") AS "hint"
     FROM "ServiceRecord" s
     JOIN "CustomerEquipment" e ON e."id" = s."equipmentId"
     JOIN "Customer" c ON c."id" = e."customerId"
     WHERE s."serviceDate" >= ${start} AND s."serviceDate" <= ${end}
-    GROUP BY e."id", e."name", c."name"
+    GROUP BY e."id", e."name", e."equipmentCode", c."name"
     ORDER BY count(*) DESC
     LIMIT 10`,
     db.serviceComplaint.findMany({
@@ -104,10 +115,24 @@ export default async function ReportsPage({
       take: 25,
     }),
     db.$queryRaw<TechnicianReportRow[]>`SELECT
+      t."id" AS "id",
       t."name",
-      (SELECT count(*)::int FROM "ServiceRecord" s WHERE s."technicianId" = t."id" AND s."serviceDate" >= ${start} AND s."serviceDate" <= ${end}) AS "count",
-      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."currentTechnicianId" = t."id" AND c."status" NOT IN ('SERVICE_COMPLETED','CLOSED','CANCELLED')) AS "pendingCount",
-      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."currentTechnicianId" = t."id" AND c."status" IN ('TECHNICIAN_VISITING','INSPECTION_STARTED','PROBLEM_DIAGNOSED','REPAIR_IN_PROGRESS')) AS "inProgress"
+      (SELECT count(*)::int
+       FROM "ServiceRecord" s
+       WHERE s."serviceDate" >= ${start}
+         AND s."serviceDate" <= ${end}
+         AND (
+           s."technicianId" = t."id"
+           OR EXISTS (
+             SELECT 1
+             FROM "ServiceAssignment" a
+             WHERE a."complaintId" = s."complaintId"
+               AND a."technicianId" = t."id"
+               AND a."endedReason" = 'Service completed'
+           )
+         )) AS "count",
+      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."status" NOT IN ('SERVICE_COMPLETED','CLOSED','CANCELLED') AND EXISTS (SELECT 1 FROM "ServiceAssignment" a WHERE a."complaintId" = c."id" AND a."technicianId" = t."id" AND a."isActive" = true)) AS "pendingCount",
+      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."status" IN ('TECHNICIAN_VISITING','INSPECTION_STARTED','PROBLEM_DIAGNOSED','REPAIR_IN_PROGRESS') AND EXISTS (SELECT 1 FROM "ServiceAssignment" a WHERE a."complaintId" = c."id" AND a."technicianId" = t."id" AND a."isActive" = true)) AS "inProgress"
     FROM "Technician" t
     WHERE t."isActive" = true
     ORDER BY t."name" ASC`,
@@ -151,6 +176,7 @@ export default async function ReportsPage({
     },
   ];
   const technicianBars = techStats.map((technician) => ({
+    id: technician.id,
     label: technician.name,
     value: technician.count,
     hint: `${technician.pendingCount} open, ${technician.inProgress} in progress`,
@@ -373,7 +399,11 @@ export default async function ReportsPage({
                   <td>{date(complaint.complaintDate)}</td>
                   <td>{complaint.customer.name}</td>
                   <td>{complaint.equipment?.name ?? "No equipment"}</td>
-                  <td>{complaint.currentTechnician?.name ?? "Unassigned"}</td>
+                  <td>
+                    {complaint.assignments.length
+                      ? complaint.assignments.map((assignment) => assignment.technician.name).join(", ")
+                      : "Unassigned"}
+                  </td>
                   <td>{complaint.status.replaceAll("_", " ")}</td>
                 </tr>
               ))}

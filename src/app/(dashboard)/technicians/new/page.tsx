@@ -5,6 +5,8 @@ import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { TechnicianPhotoField } from "@/components/technician-photo-field";
 
 export default async function NewTechnicianPage() {
   await requireRoles(["ADMIN"]);
@@ -24,7 +26,7 @@ export default async function NewTechnicianPage() {
               <Input name="name" required />
             </Field>
             <Field label="Mobile" required>
-              <Input name="mobile" required />
+              <PhoneInput name="mobile" required />
             </Field>
             <Field label="Email" required>
               <Input name="email" type="email" required />
@@ -35,6 +37,7 @@ export default async function NewTechnicianPage() {
             <Field label="Specialization">
               <Input name="specialization" />
             </Field>
+            <TechnicianPhotoField />
             <Field label="Login Username" required>
               <Input name="username" required />
             </Field>

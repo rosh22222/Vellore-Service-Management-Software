@@ -8,6 +8,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { date, money } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
+import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
 
 export default async function EquipmentDetail({
   params,
@@ -33,7 +34,13 @@ export default async function EquipmentDetail({
             ],
           },
         },
-        include: { currentTechnician: true },
+        include: {
+          assignments: {
+            where: { isActive: true },
+            include: { technician: true },
+            orderBy: { assignedAt: "asc" },
+          },
+        },
         orderBy: { complaintDate: "desc" },
       },
       serviceRecords: {
@@ -74,13 +81,13 @@ export default async function EquipmentDetail({
         }
       />
       {updated === "1" && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
           <div className="font-semibold">Equipment updated successfully.</div>
           <div className="mt-1">
             Linked Bill Details and service screens now use the latest product
             information.
           </div>
-        </div>
+        </AutoDismissNotice>
       )}
       <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
         <Card>
@@ -164,7 +171,11 @@ export default async function EquipmentDetail({
                       </div>
                     </td>
                     <td>{c.customerComplaint}</td>
-                    <td>{c.currentTechnician?.name ?? "—"}</td>
+                    <td>
+                      {c.assignments.length
+                        ? c.assignments.map((assignment) => assignment.technician.name).join(", ")
+                        : "—"}
+                    </td>
                     <td>
                       <Badge value={c.status} />
                     </td>

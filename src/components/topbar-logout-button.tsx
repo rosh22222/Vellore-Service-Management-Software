@@ -4,6 +4,7 @@ import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
 import { useState } from "react";
 import { startLoading } from "@/lib/loading-feedback";
+import { DismissibleErrorDialog } from "@/components/dismissible-error-dialog";
 
 export function TopbarLogoutButton() {
   const [pending, setPending] = useState(false);
@@ -21,7 +22,7 @@ export function TopbarLogoutButton() {
       {pending ? <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <LogOut size={17} />}
       <span>{pending ? "Logging out…" : "Logout"}</span>
     </button>
-    {error && <p role="alert" className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-rose-200 bg-white p-3 text-xs text-rose-700 shadow-lg">{error}</p>}
+    {error && <DismissibleErrorDialog message={error} onClose={() => setError("")} />}
     </div>
   );
 }

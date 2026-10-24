@@ -15,7 +15,11 @@ export async function GET(
     db.serviceRecord.findUnique({
       where: { id },
       include: {
-        complaint: true,
+        complaint: {
+          include: {
+            assignments: { select: { technicianId: true } },
+          },
+        },
         collections: { select: { amount: true } },
       },
     }),
@@ -27,7 +31,12 @@ export async function GET(
     const hasActiveEquipmentJob = record.equipmentId
       ? await db.serviceComplaint.count({
           where: {
-            currentTechnicianId: user.technicianId ?? "__none__",
+            assignments: {
+              some: {
+                technicianId: user.technicianId ?? "__none__",
+                isActive: true,
+              },
+            },
             equipmentId: record.equipmentId,
             status: {
               notIn: [
@@ -39,7 +48,10 @@ export async function GET(
           },
         })
       : 0;
-    if (record.technicianId !== user.technicianId && !hasActiveEquipmentJob)
+    const wasAssigned = record.complaint.assignments.some(
+      (assignment) => assignment.technicianId === user.technicianId,
+    );
+    if (!wasAssigned && !hasActiveEquipmentJob)
       return new Response("Forbidden", { status: 403 });
   }
 

@@ -46,6 +46,32 @@ export function optionalString(value: FormDataEntryValue | null) {
   return s || null;
 }
 
+export function phoneNumber(
+  value: FormDataEntryValue | null,
+  label: string,
+  required = true,
+) {
+  const phone = String(value ?? "").trim();
+  if (!phone) {
+    if (required) throw new Error(`${label} is required.`);
+    return null;
+  }
+  if (!/^\d{10}$/.test(phone))
+    throw new Error(`${label} must contain exactly 10 digits.`);
+  return phone;
+}
+
+export function indianPinCode(
+  value: FormDataEntryValue | null,
+  label = "PIN Code",
+) {
+  const pin = String(value ?? "").trim();
+  if (!pin) throw new Error(`${label} is required.`);
+  if (!/^\d{6}$/.test(pin))
+    throw new Error(`${label} must contain exactly 6 digits.`);
+  return pin;
+}
+
 export function optionalDate(value: FormDataEntryValue | null) {
   const s = String(value ?? "").trim();
   if (!s) return null;

@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { TechnicianPhotoField } from "@/components/technician-photo-field";
 
 export default async function EditTechnicianPage({
   params,
@@ -49,7 +51,7 @@ export default async function EditTechnicianPage({
                 <Input name="name" defaultValue={technician.name} required />
               </Field>
               <Field label="Mobile" required>
-                <Input name="mobile" defaultValue={technician.mobile} required />
+                <PhoneInput name="mobile" defaultValue={technician.mobile} required />
               </Field>
               <Field label="Email" required>
                 <Input
@@ -68,6 +70,7 @@ export default async function EditTechnicianPage({
                   defaultValue={technician.specialization ?? ""}
                 />
               </Field>
+              <TechnicianPhotoField defaultValue={technician.photoUrl} />
             </CardBody>
           </Card>
 

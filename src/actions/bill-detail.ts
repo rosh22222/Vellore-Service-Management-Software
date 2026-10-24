@@ -12,7 +12,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRoles } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { n, optionalDate, optionalString, requiredText } from "@/lib/format";
+import { indianPinCode, n, optionalDate, optionalString, phoneNumber, requiredText } from "@/lib/format";
 import { nextDocumentNumber } from "@/lib/ids";
 import { similarity } from "@/lib/similarity";
 import { suggestedInvoiceNumber } from "@/lib/invoice-number";
@@ -410,10 +410,10 @@ export async function updateCompleteBill(id: string, formData: FormData) {
     customer: {
       type: type as CustomerType,
       name: requiredText(formData.get("newCustomerName"), "Customer name", 200),
-      primaryMobile: requiredText(formData.get("newCustomerPrimaryMobile"), "Primary mobile", 30),
-      alternateMobile: optionalString(formData.get("newCustomerAlternateMobile")), email: optionalString(formData.get("newCustomerEmail")),
+      primaryMobile: phoneNumber(formData.get("newCustomerPrimaryMobile"), "Primary mobile")!,
+      alternateMobile: phoneNumber(formData.get("newCustomerAlternateMobile"), "Alternate mobile", false), email: optionalString(formData.get("newCustomerEmail")),
       address: requiredText(formData.get("newCustomerAddress"), "Address", 1000), city: requiredText(formData.get("newCustomerCity"), "City", 120),
-      state: requiredText(formData.get("newCustomerState"), "State", 120), pinCode: requiredText(formData.get("newCustomerPinCode"), "PIN Code", 20),
+      state: requiredText(formData.get("newCustomerState"), "State", 120), pinCode: indianPinCode(formData.get("newCustomerPinCode")),
       gstNumber: optionalString(formData.get("newCustomerGstNumber")), notes: optionalString(formData.get("newCustomerNotes")),
     },
     products: products.map((data, index) => ({ data, itemId: optionalString(formData.get(`items.${index}.itemId`)), expectedUnits: optionalString(formData.get(`items.${index}.existingUnits`)) })),
@@ -545,11 +545,7 @@ async function resolveCustomer(
     );
     if (!Object.values(CustomerType).includes(type as CustomerType))
       throw new Error("Invalid customer type.");
-    const pinCode = requiredText(
-      formData.get("newCustomerPinCode"),
-      "PIN Code",
-      20,
-    );
+    const pinCode = indianPinCode(formData.get("newCustomerPinCode"));
 
     const customerCode = await nextDocumentNumber(tx, "customer", "VFE-CUS-");
     const customer = await tx.customer.create({
@@ -557,13 +553,14 @@ async function resolveCustomer(
         customerCode,
         type: type as CustomerType,
         name: requiredText(formData.get("newCustomerName"), "Customer name"),
-        primaryMobile: requiredText(
+        primaryMobile: phoneNumber(
           formData.get("newCustomerPrimaryMobile"),
           "Primary mobile",
-          30,
-        ),
-        alternateMobile: optionalString(
+        )!,
+        alternateMobile: phoneNumber(
           formData.get("newCustomerAlternateMobile"),
+          "Alternate mobile",
+          false,
         ),
         email: optionalString(formData.get("newCustomerEmail")),
         address: requiredText(formData.get("newCustomerAddress"), "Address"),

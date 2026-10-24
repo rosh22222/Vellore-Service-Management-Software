@@ -1,5 +1,24 @@
 # Validation Report
 
+## Five requested workflow improvements - 21 October 2026
+
+Status: implemented and validated as a production candidate.
+
+- Brand actions now report `Brand Added`, `Brand Deleted`, `Brand Activated`, or `Brand Deactivated` in one consistent notice below the New Brand form. Successful messages dismiss after three seconds; errors stay visible.
+- Complaint and technician-job detail pages now use one compact Complete Service form. Actual Problem Found, Work Performed, and Service Amount are required. The separate inspection, work-log, and status-update forms were removed, along with Completion Notes and Collected Now. Payments remain in Service Collections.
+- Technician create/edit supports an optional direct image upload or image URL with an immediate preview. Uploaded images are resized and compressed in the browser. The new nullable `Technician.photoUrl` migration is applied to the configured Supabase database.
+- One complaint can now have several active technicians. Office users can add or remove technicians, every assigned technician can access the job, completion records the full team, and all active assignments close when service is completed.
+- New Bill Details now presents State before City. Indian states are immediately available; the selected state's full city list is lazy-loaded, with a manual City fallback if the dataset has no entry for a territory.
+
+Verification completed after the final changes:
+
+- Prisma reports all 12 migrations applied to the configured Supabase database.
+- TypeScript passed with no errors.
+- All 59 automated tests passed, including focused regression checks for these five changes.
+- The optimized Next.js production build passed. New Bill Details loads about 119 kB initially; the city dataset is kept out of the initial page bundle.
+- The read-only Supabase-backed live sweep passed 35 checks across authentication protection, list/detail/edit routes, CSV/PDF exports, and public assets. It changed no business records.
+- The guarded write-based HTTP workflow test was not run against Supabase because it deliberately accepts only a local database. The old optional local PostgreSQL cluster remains stopped because it is documented as corrupted; its safety guard was not bypassed.
+
 ## Production-readiness audit - 17 October 2026
 
 Status: the application is a production candidate, with the external acceptance items listed below still required before calling the release 100% complete.
@@ -329,3 +348,33 @@ Revalidated on 29 September 2026 after demo-data cleanup and UX wording pass:
 ## Release checks still required with the client
 
 Technical validation cannot replace business acceptance. Before production, complete `docs/UAT_TEST_PLAN.md` using the client's real company details, tax rules, warranty policy, users and devices. Verify the final visual appearance in the deployment browsers and print one real service report.
+# Final Delivery Validation — 25 October 2026
+
+The completed application was revalidated from source, against a disposable
+fresh PostgreSQL database, and against the configured Supabase database.
+
+- TypeScript validation: passed.
+- Automated regression suite: **70/70 passed**.
+- Fresh database: **12/12 migrations applied successfully**.
+- Production seed: owner and eight default brands only; no demo customers,
+  bills, equipment, complaints or technicians.
+- Authenticated end-to-end workflow: **106/106 checks passed**.
+- Supabase read-only route/export smoke test: **37/37 passed**, including 11
+  dynamic record pages, CSV export and both PDF exports.
+- Optimized Next.js production build: passed for all application routes.
+- Production dependency audit: **0 known vulnerabilities**.
+- Git reachable-object integrity: passed.
+- Environment safety: `.env.local` is ignored and not tracked; required
+  variables are documented in `.env.example`.
+- Temporary QA records, databases, servers and validation build folders were
+  removed after testing.
+
+The tested workflow covers authentication and permissions; customer, invoice,
+product and warranty management; multiple physical machines per invoice line;
+complaint registration; multi-technician assignment and completion credit;
+permanent service history; protected deletion; service collections; reports;
+PDF/CSV exports; account disabling; and all owner/office/technician routes.
+
+Delivery note: commit and push the current working tree before deploying from
+GitHub/Vercel. The configured remote still points to the earlier first commit
+until that handoff step is completed.

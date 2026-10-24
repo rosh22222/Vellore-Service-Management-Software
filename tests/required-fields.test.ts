@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import ts from "typescript";
 import { Field, Input, Select, Textarea } from "../src/components/ui/form";
-import { nonNegativeNumber, requiredText } from "../src/lib/format";
+import { indianPinCode, nonNegativeNumber, phoneNumber, requiredText } from "../src/lib/format";
 
 Object.defineProperty(globalThis, "React", { configurable: true, value: React });
 
@@ -61,6 +61,17 @@ test("required values are rejected server-side and an explicit zero service amou
     for (const value of [null, "", "   "]) assert.throws(() => requiredText(value, label), { message: `${label} is required.` });
   }
   assert.equal(nonNegativeNumber(requiredText("0", "Service amount"), "Service amount"), 0);
+  assert.equal(phoneNumber("9876543210", "Mobile number"), "9876543210");
+  assert.equal(phoneNumber("", "Alternate mobile", false), null);
+  for (const invalid of ["987654321", "98765432101", "98765 43210", "+919876543210", "abcdefghij"])
+    assert.throws(() => phoneNumber(invalid, "Mobile number"), {
+      message: "Mobile number must contain exactly 10 digits.",
+    });
+  assert.equal(indianPinCode("632001"), "632001");
+  for (const invalid of ["", "63200", "6320019", "632 001", "ABCDEF"])
+    assert.throws(() => indianPinCode(invalid), {
+      message: invalid ? "PIN Code must contain exactly 6 digits." : "PIN Code is required.",
+    });
 });
 
 test("every starred Field in application forms also marks its editable control required", () => {
@@ -84,7 +95,7 @@ test("every starred Field in application forms also marks its editable control r
         const controls: (ts.JsxOpeningElement | ts.JsxSelfClosingElement)[] = [];
         function findControls(child: ts.Node) {
           const opening = ts.isJsxElement(child) ? child.openingElement : ts.isJsxSelfClosingElement(child) ? child : undefined;
-          if (opening && ["Input", "Select", "EquipmentSelect", "Textarea", "input", "select", "textarea"].includes(opening.tagName.getText(source))) controls.push(opening);
+          if (opening && ["Input", "PhoneInput", "PinCodeInput", "Select", "EquipmentSelect", "Textarea", "input", "select", "textarea"].includes(opening.tagName.getText(source))) controls.push(opening);
           ts.forEachChild(child, findControls);
         }
         ts.forEachChild(node, findControls);

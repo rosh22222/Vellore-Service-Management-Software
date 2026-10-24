@@ -1,15 +1,9 @@
-import { dateInput, dateBoundary } from "@/lib/business-date";
 import { ActionForm } from "@/components/action-form";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Fragment } from "react";
+import { ServiceStatus } from "@prisma/client";
 import {
-  ComplaintPriority,
-  ComplaintSource,
-  ServiceStatus,
-} from "@prisma/client";
-import {
-  createComplaintFromBillDetailFromForm,
   deleteBillDetailFromForm,
   deleteBillDetailItemFromForm,
 } from "@/actions/bill-detail";
@@ -18,15 +12,12 @@ import { requireRoles } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
-import { date, money, titleCase } from "@/lib/format";
+import { date, money } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
 import { productQuantityLabel } from "@/lib/bill-quantity";
-import { EquipmentSelect } from "@/components/equipment-select";
-import { equipmentLabel } from "@/lib/equipment-label";
-import { getCachedTechnicianOptions } from "@/lib/cached-lookups";
+import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
+import { DismissibleErrorDialog } from "@/components/dismissible-error-dialog";
 
 const terminalStatuses = [
   ServiceStatus.SERVICE_COMPLETED,
@@ -47,7 +38,7 @@ export default async function BillDetailPage({
     deleteBlocked?: string;
   }>;
 }) {
-  const user = await requireRoles(["ADMIN", "OFFICE_STAFF"]);
+  await requireRoles(["ADMIN", "OFFICE_STAFF"]);
   const { id } = await params;
   const {
     billUpdated,
@@ -84,19 +75,18 @@ export default async function BillDetailPage({
             equipmentId: { in: equipmentIds },
             status: { notIn: terminalStatuses },
           },
-          include: { equipment: true, currentTechnician: true },
+          include: {
+            equipment: true,
+            assignments: {
+              where: { isActive: true },
+              include: { technician: true },
+              orderBy: { assignedAt: "asc" },
+            },
+          },
           orderBy: { complaintDate: "desc" },
         }),
       ])
     : [[], []];
-  const canAssign = user.role === "ADMIN" || user.canAssignTechnician;
-  const technicians = canAssign
-    ? (await getCachedTechnicianOptions()).filter(
-        (technician) => technician.status !== "INACTIVE",
-      )
-    : [];
-  const billEquipmentItems = bill.items.flatMap(item => item.units.map(unit => ({ ...item, equipmentId: unit.equipmentId, equipment: unit.equipment, unitNumber: unit.unitNumber })));
-
   return (
     <>
       <PageHeader
@@ -129,58 +119,60 @@ export default async function BillDetailPage({
               className="rounded-xl bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white"
               href={`/complaints/new?customerId=${bill.customerId}`}
             >
-              + Complaint Without Product
+              + New Complaint
             </Link>
           </>
         }
       />
 
       {deleteBlocked && (
-        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 shadow-sm">
-          <div className="font-bold">Delete blocked for safety.</div>
-          <div className="mt-1 leading-6">
+        <DismissibleErrorDialog
+          title="Delete blocked for safety"
+          message={
+            <>
             This bill/product is already connected with complaint or completed
             service history. Keep it available so previous repair work remains
             correct and traceable.
-          </div>
-        </div>
+            </>
+          }
+        />
       )}
 
       {productAdded && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
           <div className="font-semibold">Product added successfully.</div>
           <div className="mt-1">
             {productAdded} is now saved under this bill and linked with this
             customer&apos;s equipment/service history.
           </div>
-        </div>
+        </AutoDismissNotice>
       )}
 
       {billUpdated && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
           <div className="font-semibold">Bill details updated.</div>
           <div className="mt-1">
             Bill number, date and linked equipment reference are now refreshed.
           </div>
-        </div>
+        </AutoDismissNotice>
       )}
 
       {productUpdated && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
           <div className="font-semibold">Product updated successfully.</div>
           <div className="mt-1">
             {productUpdated} is now updated in both bill details and equipment.
           </div>
-        </div>
+        </AutoDismissNotice>
       )}
 
       {productDeleted && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
           <div className="font-semibold">Product removed successfully.</div>
           <div className="mt-1">
             The bill total and linked product register were updated safely.
           </div>
-        </div>
+        </AutoDismissNotice>
       )}
 
       <div className="grid gap-6 xl:grid-cols-[.8fr_1.2fr]">
@@ -243,95 +235,6 @@ export default async function BillDetailPage({
           </CardBody>
         </Card>
       </div>
-
-      <Card className="mt-6 border-emerald-200 bg-emerald-50/40">
-        <CardHeader
-          title="Create Service Complaint"
-          subtitle="Select the specific machine by equipment ID or serial number. Its repair history stays separate from the other machines."
-        />
-        <CardBody>
-          <ActionForm
-            action={createComplaintFromBillDetailFromForm}
-            className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"
-          >
-            <input type="hidden" name="billDetailId" value={bill.id} />
-            <Field label="Problem Product from this Bill" required>
-              <EquipmentSelect
-                name="equipmentId"
-                required
-                disabled={billEquipmentItems.length === 0}
-                placeholder="Select problem product"
-                options={billEquipmentItems.map(item => ({ value: item.equipmentId, label: equipmentLabel(item.equipment) }))}
-              />
-            </Field>
-            <Field label="Complaint Date">
-              <Input
-                name="complaintDate"
-                type="date"
-                defaultValue={dateInput()}
-              />
-            </Field>
-            <Field label="Preferred Visit Date">
-              <Input name="preferredVisitDate" type="date" />
-            </Field>
-            <Field label="Technician">
-              <Select name="technicianId" disabled={!canAssign}>
-                <option value="">
-                  {canAssign ? "Assign later" : "No assignment permission"}
-                </option>
-                {technicians.map((technician) => (
-                  <option key={technician.id} value={technician.id}>
-                    {technician.name} - {titleCase(technician.status)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Priority">
-              <Select name="priority" defaultValue="NORMAL">
-                {Object.values(ComplaintPriority).map((value) => (
-                  <option key={value} value={value}>
-                    {titleCase(value)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Problem Type">
-              <Input
-                name="complaintCategory"
-                placeholder="Noise / Belt / Display / Motor"
-              />
-            </Field>
-            <Field label="Source">
-              <Select name="source" defaultValue="PHONE">
-                {Object.values(ComplaintSource).map((value) => (
-                  <option key={value} value={value}>
-                    {titleCase(value)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div className="md:col-span-2 xl:col-span-4">
-              <Field label="Problem Details" required>
-                <Textarea
-                  name="customerComplaint"
-                  required
-                  placeholder="Customer says treadmill stops after 10 minutes..."
-                />
-              </Field>
-            </div>
-            <div className="md:col-span-2 xl:col-span-4">
-              <Field label="Office Notes">
-                <Textarea name="notes" rows={2} />
-              </Field>
-            </div>
-            <div className="md:col-span-2 xl:col-span-4">
-              <Button type="submit" disabled={billEquipmentItems.length === 0}>
-                Create Complaint for Selected Product
-              </Button>
-            </div>
-          </ActionForm>
-        </CardBody>
-      </Card>
 
       <Card className="mt-6">
         <CardHeader
@@ -515,7 +418,11 @@ export default async function BillDetailPage({
                     </td>
                     <td>{complaint.equipment?.name ?? "—"}</td>
                     <td>{date(complaint.preferredVisitDate)}</td>
-                    <td>{complaint.currentTechnician?.name ?? "Not assigned"}</td>
+                    <td>
+                      {complaint.assignments.length
+                        ? complaint.assignments.map((assignment) => assignment.technician.name).join(", ")
+                        : "Not assigned"}
+                    </td>
                     <td>
                       <Badge value={complaint.status} />
                     </td>

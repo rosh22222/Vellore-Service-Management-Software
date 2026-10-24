@@ -12,7 +12,12 @@ export default async function JobsPage() {
   const where =
     user.role === "TECHNICIAN"
       ? {
-          currentTechnicianId: user.technicianId ?? "__none__",
+          assignments: {
+            some: {
+              technicianId: user.technicianId ?? "__none__",
+              isActive: true,
+            },
+          },
           status: {
             notIn: [
               ServiceStatus.SERVICE_COMPLETED,
@@ -32,7 +37,15 @@ export default async function JobsPage() {
         };
   const rows = await db.serviceComplaint.findMany({
     where,
-    include: { customer: true, equipment: true, currentTechnician: true },
+    include: {
+      customer: true,
+      equipment: true,
+      assignments: {
+        where: { isActive: true },
+        include: { technician: true },
+        orderBy: { assignedAt: "asc" },
+      },
+    },
     orderBy: [{ priority: "desc" }, { complaintDate: "asc" }],
     take: 100,
   });
@@ -84,7 +97,11 @@ export default async function JobsPage() {
                     <td>
                       <Badge value={c.status} />
                     </td>
-                    <td>{c.currentTechnician?.name ?? "—"}</td>
+                    <td>
+                      {c.assignments.length
+                        ? c.assignments.map((assignment) => assignment.technician.name).join(", ")
+                        : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>

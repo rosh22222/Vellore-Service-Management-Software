@@ -1,21 +1,15 @@
 import { ActionForm } from "@/components/action-form";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { PaymentMode, ServiceStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import {
-  saveInspectionFromForm,
-  addWorkLogFromForm,
-  updateServiceStatusFromForm,
-  completeServiceFromForm,
-} from "@/actions/complaint";
+import { completeServiceFromForm } from "@/actions/complaint";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
-import { date, titleCase } from "@/lib/format";
+import { Field, Input, Textarea } from "@/components/ui/form";
+import { date } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
 
 export default async function JobDetail({
@@ -39,11 +33,29 @@ export default async function JobDetail({
         orderBy: { changedAt: "desc" },
       },
       serviceRecord: true,
+      assignments: {
+        include: { technician: true },
+        orderBy: { assignedAt: "asc" },
+      },
     },
   });
   if (!c) notFound();
-  if (c.currentTechnicianId !== user.technicianId)
-    throw new Error("This job is not assigned to you.");
+  const activeAssignments = c.assignments.filter((assignment) => assignment.isActive);
+  const hasActiveAssignment = activeAssignments.some(
+    (assignment) => assignment.technicianId === user.technicianId,
+  );
+  if (c.serviceRecord) {
+    const receivedCompletionCredit =
+      c.serviceRecord.technicianId === user.technicianId ||
+      c.assignments.some(
+        (assignment) =>
+          assignment.technicianId === user.technicianId &&
+          assignment.endedReason === "Service completed",
+      );
+    if (!receivedCompletionCredit) notFound();
+    redirect(`/service-history/${c.serviceRecord.id}`);
+  }
+  if (!hasActiveAssignment) notFound();
   const history = c.equipmentId
     ? await db.serviceRecord.findMany({
         where: { equipmentId: c.equipmentId },
@@ -177,99 +189,37 @@ export default async function JobDetail({
         </div>
       </Card>
       {!complete && (
-        <div className="mt-6 grid gap-6 xl:grid-cols-2">
+        <div className="mt-6">
           <Card>
-            <CardHeader title="Inspection & Diagnosis" />
+            <CardHeader
+              title="Complete Service"
+              subtitle={`Assigned team: ${activeAssignments.map((assignment) => assignment.technician.name).join(", ")}`}
+            />
             <CardBody>
-              <ActionForm action={saveInspectionFromForm} className="space-y-4">
+              <ActionForm action={completeServiceFromForm} className="grid gap-5 md:grid-cols-2">
                 <input type="hidden" name="complaintId" value={c.id} />
-                <Field label="Inspection Findings" required>
-                  <Textarea
-                    name="findings"
-                    required
-                    defaultValue={c.inspection?.findings ?? ""}
-                    placeholder="Drive belt loose and motor belt alignment incorrect."
-                  />
-                </Field>
+                <div className="md:col-span-2">
+                  <Field
+                    label="Customer Complaint / Problem Reported"
+                    hint="Copied from the office complaint for reference while completing the job."
+                  >
+                    <Textarea value={c.customerComplaint} readOnly rows={3} />
+                  </Field>
+                </div>
                 <Field label="Actual Problem Found" required>
                   <Textarea
                     name="actualProblem"
                     required
                     defaultValue={c.inspection?.actualProblem ?? ""}
-                    placeholder="Drive belt loose."
+                    placeholder="Describe the actual fault found during service."
                   />
                 </Field>
-                <Button>Save Diagnosis</Button>
-              </ActionForm>
-            </CardBody>
-          </Card>
-          <Card>
-            <CardHeader title="Work Performed" />
-            <CardBody>
-              {c.workLogs.map((w) => (
-                <div key={w.id} className="mb-3 rounded-xl bg-brand-subtle p-4">
-                  <div className="whitespace-pre-line font-medium">
-                    {w.workDone}
-                  </div>
-                  <div className="mt-2 text-xs text-brand-muted">
-                    {date(w.createdAt, true)}
-                  </div>
-                </div>
-              ))}
-              <ActionForm action={addWorkLogFromForm} className="space-y-4">
-                <input type="hidden" name="complaintId" value={c.id} />
-                <Field label="Work Done" required>
+                <Field label="Work Performed" required>
                   <Textarea
                     name="workDone"
                     required
-                    placeholder="Drive belt tightened; motor belt aligned; lubrication completed; machine tested."
-                  />
-                </Field>
-                <Field label="Notes">
-                  <Input name="notes" />
-                </Field>
-                <Button>Add Work</Button>
-              </ActionForm>
-            </CardBody>
-          </Card>
-        </div>
-      )}
-      {!complete && (
-        <div className="mt-6 grid gap-6 xl:grid-cols-3">
-          <Card>
-            <CardHeader title="Service Status" />
-            <CardBody>
-              <ActionForm action={updateServiceStatusFromForm} className="space-y-3">
-                <input type="hidden" name="complaintId" value={c.id} />
-                <Select name="status" defaultValue={c.status}>
-                  {Object.values(ServiceStatus)
-                    .filter(
-                      (v) =>
-                        !["SERVICE_COMPLETED", "CLOSED", "CANCELLED"].includes(
-                          v,
-                        ) && v !== ServiceStatus.WAITING_FOR_CUSTOMER_APPROVAL,
-                    )
-                    .map((v) => (
-                      <option value={v} key={v}>
-                        {titleCase(v)}
-                      </option>
-                    ))}
-                </Select>
-                <Input name="notes" placeholder="Status note" />
-                <Button>Update</Button>
-              </ActionForm>
-            </CardBody>
-          </Card>
-          <Card>
-            <CardHeader title="Complete Service" />
-            <CardBody>
-              <ActionForm action={completeServiceFromForm} className="space-y-3">
-                <input type="hidden" name="complaintId" value={c.id} />
-                <Field label="Completion Notes" required>
-                  <Textarea
-                    name="completionNotes"
-                    required
-                    placeholder="Testing / handover notes"
+                    defaultValue={c.workLogs.map((work) => work.workDone).join("\n")}
+                    placeholder="Describe the repair or service work completed."
                   />
                 </Field>
                 <Field
@@ -280,34 +230,17 @@ export default async function JobDetail({
                   <Input
                     name="charges"
                     required
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="\d+(\.\d{1,2})?"
+                    title="Enter an amount using numbers with up to two decimal places."
                     defaultValue="0"
                   />
                 </Field>
-                <Field
-                  label="Collected Now"
-                  hint="Enter 0 if customer will pay later."
-                >
-                  <Input
-                    name="collectedNow"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    defaultValue="0"
-                  />
-                </Field>
-                <Field label="Payment Mode">
-                  <Select name="paymentMode" defaultValue={PaymentMode.CASH}>
-                    {Object.values(PaymentMode).map((mode) => (
-                      <option key={mode} value={mode}>
-                        {titleCase(mode)}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Button variant="success" className="w-full">
+                <div className="self-end rounded-xl border border-brand-border bg-brand-faint p-4 text-sm text-brand-secondary">
+                  The office can record payment later from <b>Service Collections</b>.
+                </div>
+                <Button variant="success" className="md:col-span-2 md:justify-self-start">
                   Complete Service
                 </Button>
               </ActionForm>

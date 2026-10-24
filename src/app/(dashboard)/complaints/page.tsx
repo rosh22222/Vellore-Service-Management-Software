@@ -1,6 +1,6 @@
 import { dateInput, dateBoundary } from "@/lib/business-date";
 import Link from "next/link";
-import { ComplaintPriority, Prisma, ServiceStatus } from "@prisma/client";
+import { ComplaintPriority, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireRoles } from "@/lib/auth";
 import { PageHeader, EmptyState } from "@/components/ui/page";
@@ -9,10 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { SearchForm } from "@/components/ui/search-form";
 import { date, titleCase } from "@/lib/format";
 import { getCachedTechnicianOptions } from "@/lib/cached-lookups";
+import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
 
 type Params = {
   q?: string;
-  status?: string;
   priority?: string;
   technician?: string;
   customer?: string;
@@ -22,6 +22,7 @@ type Params = {
   from?: string;
   to?: string;
   page?: string;
+  created?: string;
 };
 const pageSize = 25;
 
@@ -54,20 +55,20 @@ export default async function ComplaintsPage({
       },
     ];
   if (
-    params.status &&
-    Object.values(ServiceStatus).includes(params.status as ServiceStatus)
-  )
-    where.status = params.status as ServiceStatus;
-  if (
     params.priority &&
     Object.values(ComplaintPriority).includes(
       params.priority as ComplaintPriority,
     )
   )
     where.priority = params.priority as ComplaintPriority;
-  if (params.technician) where.currentTechnicianId = params.technician;
-  if (params.assigned === "yes") where.currentTechnicianId = { not: null };
-  if (params.assigned === "no") where.currentTechnicianId = null;
+  if (params.technician)
+    where.assignments = {
+      some: { technicianId: params.technician, isActive: true },
+    };
+  if (params.assigned === "yes" && !params.technician)
+    where.assignments = { some: { isActive: true } };
+  if (params.assigned === "no")
+    where.assignments = { none: { isActive: true } };
   if (params.warranty === "under")
     where.equipment = { warrantyExpiryDate: { gte: today } };
   if (params.warranty === "out")
@@ -85,7 +86,15 @@ export default async function ComplaintsPage({
   const [rows, total, technicians] = await Promise.all([
     db.serviceComplaint.findMany({
       where,
-      include: { customer: true, equipment: true, currentTechnician: true },
+      include: {
+        customer: true,
+        equipment: true,
+        assignments: {
+          where: { isActive: true },
+          include: { technician: true },
+          orderBy: { assignedAt: "asc" },
+        },
+      },
       orderBy: { complaintDate: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -97,7 +106,11 @@ export default async function ComplaintsPage({
   const preservedSearchFields = Object.fromEntries(
     Object.entries(params).filter(
       (entry): entry is [string, string] =>
-        entry[0] !== "q" && entry[0] !== "page" && Boolean(entry[1]),
+        entry[0] !== "q" &&
+        entry[0] !== "page" &&
+        entry[0] !== "status" &&
+        entry[0] !== "created" &&
+        Boolean(entry[1]),
     ),
   );
   const searchResetQuery = new URLSearchParams(preservedSearchFields).toString();
@@ -106,8 +119,11 @@ export default async function ComplaintsPage({
     : "/complaints";
   const pageHref = (target: number) => {
     const query = new URLSearchParams(
-      Object.entries(params).filter((entry): entry is [string, string] =>
-        Boolean(entry[1]),
+      Object.entries(params).filter(
+        (entry): entry is [string, string] =>
+          entry[0] !== "status" &&
+          entry[0] !== "created" &&
+          Boolean(entry[1]),
       ),
     );
     query.set("page", String(target));
@@ -128,6 +144,11 @@ export default async function ComplaintsPage({
           </Link>
         }
       />
+      {Number(params.created) > 1 && (
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-800 shadow-sm">
+          {params.created} equipment complaints were registered successfully.
+        </AutoDismissNotice>
+      )}
       <SearchForm
         query={params.q ?? ""}
         label="Search service complaints"
@@ -135,17 +156,8 @@ export default async function ComplaintsPage({
         resetHref={searchResetHref}
         hiddenFields={preservedSearchFields}
       />
-      <form className="mb-4 grid gap-2 rounded-2xl border border-brand-border bg-white p-4 md:grid-cols-2 xl:grid-cols-5">
+      <form className="mb-4 grid gap-2 rounded-2xl border border-brand-border bg-white p-4 md:grid-cols-2 xl:grid-cols-4">
         {params.q && <input type="hidden" name="q" value={params.q} />}
-        <SelectFilter
-          name="status"
-          value={params.status}
-          label="All statuses"
-          options={Object.values(ServiceStatus).map((value) => [
-            value,
-            titleCase(value),
-          ])}
-        />
         <SelectFilter
           name="priority"
           value={params.priority}
@@ -194,7 +206,7 @@ export default async function ComplaintsPage({
           aria-label="To date"
           className="rounded-xl border border-brand-input px-3 py-2 text-sm outline-none hover:border-brand-primary focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/10"
         />
-        <div className="flex gap-2 xl:col-span-5">
+        <div className="flex gap-2 xl:col-span-4">
           <button className="rounded-xl bg-brand-primary px-4 py-2 text-sm font-semibold text-white hover:bg-brand-primary-hover">
             Apply Filters
           </button>
@@ -261,7 +273,11 @@ export default async function ComplaintsPage({
                         {complaint.customerComplaint}
                       </td>
                       <td>
-                        {complaint.currentTechnician?.name ?? "Unassigned"}
+                        {complaint.assignments.length
+                          ? complaint.assignments
+                              .map((assignment) => assignment.technician.name)
+                              .join(", ")
+                          : "Unassigned"}
                       </td>
                       <td>
                         <Badge value={complaint.priority} />

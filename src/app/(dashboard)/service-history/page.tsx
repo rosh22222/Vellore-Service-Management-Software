@@ -50,7 +50,10 @@ export default async function ServiceHistoryPage({
       { technicianNameSnapshot: { contains: params.q, mode: "insensitive" } },
     ];
   }
-  if (params.technician) where.technicianId = params.technician;
+  if (params.technician)
+    where.complaint = {
+      assignments: { some: { technicianId: params.technician } },
+    };
   if (params.customer) where.customerId = params.customer;
   if (params.equipment) where.equipmentId = params.equipment;
   if (

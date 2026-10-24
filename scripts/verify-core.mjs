@@ -79,6 +79,7 @@ async function page(request, path) {
 }
 const admin = client(), tech = client(), staff = client(), anonymous = client();
 let adminId, staffId, technicianUserId, technicianId;
+let assistingTechnicianUserId, assistingTechnicianId;
 const product = (serial, prefix = "") => Object.fromEntries(Object.entries({
   itemName: "QA treadmill", brand: "QA brand", modelNumber: "QA-M1", serialNumber: serial,
   quantity: "1", unitPrice: "1200.50", warrantyApplicable: "on", warrantyMonths: "12",
@@ -103,6 +104,21 @@ try {
   await login(tech, technician.user.username);
   await login(tech, technicianEmail);
   passed("Technician authentication");
+  const assistingTechnicianName = `${tag}-assistant`;
+  success(await act(admin, "createTechnician", {
+    name: assistingTechnicianName,
+    email: `${tag.toLowerCase()}-assistant@example.test`,
+    mobile: "9000000002",
+    username: `${tag}-assistant-tech`,
+    password: pass,
+    specialization: "QA support",
+  }, "/technicians/new"), "Create assisting technician");
+  const assistingTechnician = await db.technician.findFirstOrThrow({
+    where: { name: assistingTechnicianName },
+    include: { user: true },
+  });
+  assistingTechnicianId = assistingTechnician.id;
+  assistingTechnicianUserId = assistingTechnician.user.id;
   success(await act(admin, "updateTechnician", { name: tag, email: technicianEmail, mobile: "9000000001", username: technician.user.username, specialization: "Updated QA specialization" }, `/technicians/${technicianId}/edit`, [technicianId]), "Edit technician profile");
   assert.equal((await db.user.findUniqueOrThrow({ where: { id: technicianUserId } })).specialization, "Updated QA specialization");
   passed("Technician profile stays synchronized with login account");
@@ -163,7 +179,7 @@ try {
   const machineTwoJob = `/jobs/${machineTwoComplaint.id}`;
   success(await act(tech, "saveInspectionFromForm", { complaintId: machineTwoComplaint.id, findings: "Motor stops after running", actualProblem: "Motor stops after running" }, machineTwoJob), "Inspect only treadmill number two");
   success(await act(tech, "addWorkLogFromForm", { complaintId: machineTwoComplaint.id, workDone: "Repaired treadmill two motor and tested" }, machineTwoJob), "Record machine-specific repair work");
-  success(await act(tech, "completeServiceFromForm", { complaintId: machineTwoComplaint.id, completionNotes: "Machine two tested", charges: 200 }, machineTwoJob), "Complete treadmill number two independently");
+  success(await act(tech, "completeServiceFromForm", { complaintId: machineTwoComplaint.id, actualProblem: "Motor stops after running", workDone: "Repaired treadmill two motor and tested", charges: 200 }, machineTwoJob), "Complete treadmill number two independently");
   success(await act(admin, "createComplaintFromBillDetailFromForm", { billDetailId: bulkBill.id, equipmentId: machineIds[4], customerComplaint: "Motor stops after running" }, `/bill-details/${bulkBill.id}`), "Register a later problem on treadmill number five");
   const machineFiveComplaint = await db.serviceComplaint.findFirstOrThrow({ where: { equipmentId: machineIds[4] } });
   assert.equal(machineFiveComplaint.repeatIssueDetected, false);
@@ -188,20 +204,51 @@ try {
   success(await act(admin, "createComplaintFromBillDetailFromForm", { billDetailId: bill.id, equipmentId: equipment.id, customerComplaint: "Motor belt slipping", technicianId, preferredVisitDate: "2026-10-05" }, `/bill-details/${bill.id}`), "Complaint from one bill product with technician and visit date");
   let complaint = await db.serviceComplaint.findFirstOrThrow({ where: { equipmentId: equipment.id } });
   const job = `/jobs/${complaint.id}`;
-  rejected(await act(tech, "completeServiceFromForm", { complaintId: complaint.id, completionNotes: "Finished", charges: 500 }, job), "Completion requires diagnosis and work");
+  success(await act(admin, "assignTechnicianFromForm", {
+    complaintId: complaint.id,
+    technicianId: assistingTechnicianId,
+    reason: "Assisting with this service",
+  }, `/complaints/${complaint.id}`), "Assign a second technician to the same service");
+  rejected(await act(tech, "completeServiceFromForm", { complaintId: complaint.id, charges: 500 }, job), "Completion requires actual problem and work performed");
   success(await act(tech, "saveInspectionFromForm", { complaintId: complaint.id, findings: "Belt is loose", actualProblem: "Motor belt slipping" }, job), "Technician saves diagnosis");
   success(await act(tech, "addWorkLogFromForm", { complaintId: complaint.id, workDone: "Adjusted belt tension and tested treadmill" }, job), "Technician records work done");
-  success(await act(tech, "completeServiceFromForm", { complaintId: complaint.id, completionNotes: "Tested and handed over", charges: 500, collectedNow: 100, paymentMode: "CASH" }, job), "Complete service and collect initial payment");
+  success(await act(tech, "completeServiceFromForm", { complaintId: complaint.id, actualProblem: "Motor belt slipping", workDone: "Adjusted belt tension and tested treadmill", charges: 500 }, job), "Complete service and create permanent record");
   const service = await db.serviceRecord.findUniqueOrThrow({ where: { complaintId: complaint.id }, include: { collections: true } });
-  assert.equal(service.collections.length, 1); assert.equal(Number(service.charges), 500);
+  assert.equal(service.collections.length, 0); assert.equal(Number(service.charges), 500);
   assert.equal(await db.serviceAssignment.count({ where: { complaintId: complaint.id, isActive: true } }), 0);
-  passed("Permanent service history, charges, payment and assignment closure");
+  passed("Permanent service history, charges and assignment closure");
+  const completedAssignments = await db.serviceAssignment.findMany({
+    where: { complaintId: complaint.id, endedReason: "Service completed" },
+    select: { technicianId: true },
+  });
+  assert.deepEqual(
+    new Set(completedAssignments.map((assignment) => assignment.technicianId)),
+    new Set([technicianId, assistingTechnicianId]),
+  );
+  assert(service.technicianNameSnapshot?.includes(technician.name));
+  assert(service.technicianNameSnapshot?.includes(assistingTechnician.name));
+  for (const creditedTechnicianId of [technicianId, assistingTechnicianId]) {
+    assert.equal(await db.serviceRecord.count({
+      where: {
+        id: service.id,
+        complaint: {
+          assignments: {
+            some: {
+              technicianId: creditedTechnicianId,
+              endedReason: "Service completed",
+            },
+          },
+        },
+      },
+    }), 1);
+  }
+  passed("All technicians assigned through completion receive service credit");
   rejected(await act(tech, "addWorkLogFromForm", { complaintId: complaint.id, workDone: "must not overwrite" }, job), "Completed service is immutable");
   const payments = await Promise.all([1, 2].map(() => act(admin, "createServiceCollection", { serviceRecordId: service.id, amount: 300, paymentMode: "UPI" }, "/service-collections")));
   assert.equal(payments.filter(r => r.text.includes('"ok":true')).length, 1);
   assert.equal(payments.filter(r => r.text.includes('"ok":false')).length, 1);
   passed("Simultaneous payments cannot exceed balance");
-  success(await act(admin, "createServiceCollection", { serviceRecordId: service.id, amount: 100, paymentMode: "CASH" }, "/service-collections"), "Collect remaining balance");
+  success(await act(admin, "createServiceCollection", { serviceRecordId: service.id, amount: 200, paymentMode: "CASH" }, "/service-collections"), "Collect remaining balance");
   const total = await db.serviceCollection.aggregate({ where: { serviceRecordId: service.id }, _sum: { amount: true } });
   assert.equal(Number(total._sum.amount), 500); passed("Payments equal service charge");
   const deletion = await act(admin, "deleteBillDetailFromForm", { billDetailId: bill.id }, "/bill-details");
@@ -238,7 +285,14 @@ try {
   }
   assert.equal((await admin("/api/reports/export?format=csv")).status, 200); passed("CSV export");
   assert.equal((await admin("/api/reports/export?from=bad-date")).status, 400); passed("Invalid export date returns 400");
-  await db.user.update({ where: { id: technicianUserId }, data: { isActive: false } });
+  success(await act(admin, "updateServiceStatusFromForm", {
+    complaintId: externalComplaint.id,
+    status: "CANCELLED",
+    notes: "QA cleanup before disabling technician",
+  }, `/complaints/${externalComplaint.id}`), "Close the technician's remaining open job");
+  success(await act(admin, "setTechnicianStatus", {
+    status: "INACTIVE",
+  }, `/technicians/${technicianId}`, [technicianId]), "Disable technician access through the application");
   const disabledResponse = await tech("/jobs");
   assert(disabledResponse.headers.get("location")?.includes("/login") || (await disabledResponse.text()).includes('url=/login'));
   passed("Disabled account loses existing session access");
@@ -254,8 +308,8 @@ try {
     await tx.billDetail.deleteMany({ where: scope });
     await tx.customerEquipment.deleteMany({ where: scope });
     await tx.customer.deleteMany({ where: { id: { in: customerIds } } });
-    await tx.technician.deleteMany({ where: { name: tag } });
-    await tx.user.deleteMany({ where: { OR: [{ name: tag }, { id: { in: [adminId, staffId, technicianUserId].filter(Boolean) } }] } });
+    await tx.technician.deleteMany({ where: { name: { in: [tag, `${tag}-assistant`] } } });
+    await tx.user.deleteMany({ where: { OR: [{ name: { in: [tag, `${tag}-assistant`] } }, { id: { in: [adminId, staffId, technicianUserId, assistingTechnicianUserId].filter(Boolean) } }] } });
   });
   console.log("Cleanup: temporary QA records removed; original client records preserved.");
   await db.$disconnect();

@@ -6,20 +6,16 @@ import { CustomerType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireRoles } from "@/lib/auth";
 import { nextDocumentNumber } from "@/lib/ids";
-import { optionalString, requiredText } from "@/lib/format";
+import { indianPinCode, optionalString, phoneNumber, requiredText } from "@/lib/format";
 
 export async function createCustomer(formData: FormData) {
   const user = await requireRoles(["ADMIN", "OFFICE_STAFF"]);
   const name = requiredText(formData.get("name"), "Customer name", 200);
-  const primaryMobile = requiredText(
-    formData.get("primaryMobile"),
-    "Primary mobile",
-    30,
-  );
+  const primaryMobile = phoneNumber(formData.get("primaryMobile"), "Primary mobile")!;
   const address = requiredText(formData.get("address"), "Address", 1000);
   const city = requiredText(formData.get("city"), "City", 120);
   const state = requiredText(formData.get("state"), "State", 120);
-  const pinCode = requiredText(formData.get("pinCode"), "PIN Code", 20);
+  const pinCode = indianPinCode(formData.get("pinCode"));
   const type = requiredText(formData.get("type"), "Customer type", 50);
   if (!Object.values(CustomerType).includes(type as CustomerType))
     throw new Error("Invalid customer type.");
@@ -32,7 +28,11 @@ export async function createCustomer(formData: FormData) {
         type: type as CustomerType,
         name,
         primaryMobile,
-        alternateMobile: optionalString(formData.get("alternateMobile")),
+        alternateMobile: phoneNumber(
+          formData.get("alternateMobile"),
+          "Alternate mobile",
+          false,
+        ),
         email: optionalString(formData.get("email")),
         address,
         city,
@@ -57,15 +57,11 @@ export async function updateCustomer(id: string, formData: FormData) {
   if (!Object.values(CustomerType).includes(type as CustomerType))
     throw new Error("Invalid customer type.");
   const name = requiredText(formData.get("name"), "Customer name", 200);
-  const primaryMobile = requiredText(
-    formData.get("primaryMobile"),
-    "Primary mobile",
-    30,
-  );
+  const primaryMobile = phoneNumber(formData.get("primaryMobile"), "Primary mobile")!;
   const address = requiredText(formData.get("address"), "Address", 1000);
   const city = requiredText(formData.get("city"), "City", 120);
   const state = requiredText(formData.get("state"), "State", 120);
-  const pinCode = requiredText(formData.get("pinCode"), "PIN Code", 20);
+  const pinCode = indianPinCode(formData.get("pinCode"));
   await db.$transaction(async (tx) => {
     const row = await tx.customer.update({
       where: { id },
@@ -73,7 +69,11 @@ export async function updateCustomer(id: string, formData: FormData) {
         type: type as CustomerType,
         name,
         primaryMobile,
-        alternateMobile: optionalString(formData.get("alternateMobile")),
+        alternateMobile: phoneNumber(
+          formData.get("alternateMobile"),
+          "Alternate mobile",
+          false,
+        ),
         email: optionalString(formData.get("email")),
         address,
         city,

@@ -7,6 +7,8 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { titleCase } from "@/lib/format";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { PinCodeInput } from "@/components/ui/pin-code-input";
 
 export default async function NewCustomerPage() {
   await requireRoles(["ADMIN", "OFFICE_STAFF"]);
@@ -38,10 +40,10 @@ export default async function NewCustomerPage() {
               <Input name="name" required placeholder="Customer / gym name" />
             </Field>
             <Field label="Primary Mobile" required>
-              <Input name="primaryMobile" required inputMode="tel" />
+              <PhoneInput name="primaryMobile" required />
             </Field>
             <Field label="Alternate Mobile">
-              <Input name="alternateMobile" inputMode="tel" />
+              <PhoneInput name="alternateMobile" />
             </Field>
             <Field label="Email">
               <Input name="email" type="email" />
@@ -56,7 +58,7 @@ export default async function NewCustomerPage() {
               <Input name="state" required defaultValue="Tamil Nadu" />
             </Field>
             <Field label="PIN Code" required>
-              <Input name="pinCode" required />
+              <PinCodeInput name="pinCode" required />
             </Field>
             <Field label="GST Number">
               <Input name="gstNumber" />

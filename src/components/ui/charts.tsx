@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 
 type ChartItem = {
+  id?: string;
   label: string;
   value: number;
   hint?: string;
@@ -8,6 +9,10 @@ type ChartItem = {
 };
 
 const palette = ["var(--primary)", "var(--chart-warm)", "var(--chart-cool)", "var(--chart-success)", "var(--chart-violet)"];
+
+function chartKey(item: ChartItem, index: number) {
+  return item.id ? `${item.id}-${index}` : `${item.label}-${index}`;
+}
 
 export function HorizontalBarList({
   items,
@@ -26,7 +31,7 @@ export function HorizontalBarList({
         const color = item.color ?? palette[index % palette.length];
         const width = Math.max(0, Math.min(100, (item.value / resolvedMax) * 100));
         return (
-          <div key={item.label}>
+          <div key={chartKey(item, index)}>
             <div className="mb-2 flex items-center justify-between gap-3">
               <div>
                 <div className="text-[13px] font-medium text-brand-ink">
@@ -110,7 +115,7 @@ export function DonutChart({
               : 0;
             return (
               <div
-                key={item.label}
+                key={chartKey(item, index)}
                 className="flex items-center justify-between gap-3 rounded-xl bg-brand-subtle px-3 py-2.5"
               >
                 <div className="flex items-center gap-2 text-xs font-medium text-brand-secondary">
@@ -147,7 +152,7 @@ export function StackedMeter({
       <div className="flex h-3 overflow-hidden rounded-full bg-brand-subtle">
         {items.map((item, index) => (
           <div
-            key={item.label}
+            key={chartKey(item, index)}
             title={`${item.label}: ${item.value}`}
             style={{
               width: `${Math.max(0, (item.value / total) * 100)}%`,
@@ -159,7 +164,7 @@ export function StackedMeter({
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         {items.map((item, index) => (
           <div
-            key={item.label}
+            key={chartKey(item, index)}
             className="rounded-lg border border-brand-border bg-brand-subtle p-3"
           >
             <div className="flex items-center gap-2">

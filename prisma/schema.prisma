@@ -176,6 +176,7 @@ model Technician {
   mobile            String
   email             String?
   address           String?
+  photoUrl          String?
   skills            String?
   specialization    String?
   joiningDate       DateTime?

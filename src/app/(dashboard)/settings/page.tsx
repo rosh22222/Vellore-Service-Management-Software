@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 export default async function SettingsPage() {
   await requireRoles(["ADMIN"]);
@@ -30,7 +31,7 @@ export default async function SettingsPage() {
               />
             </Field>
             <Field label="Phone">
-              <Input name="phone" defaultValue={s?.phone ?? ""} />
+              <PhoneInput name="phone" defaultValue={s?.phone ?? ""} />
             </Field>
             <Field label="Email">
               <Input name="email" type="email" defaultValue={s?.email ?? ""} />
@@ -42,9 +43,6 @@ export default async function SettingsPage() {
             </div>
             <Field label="GST Number">
               <Input name="gstNumber" defaultValue={s?.gstNumber ?? ""} />
-            </Field>
-            <Field label="Website">
-              <Input name="website" defaultValue={s?.website ?? ""} />
             </Field>
             <div className="md:col-span-2 xl:col-span-3">
               <Button>Save Settings</Button>

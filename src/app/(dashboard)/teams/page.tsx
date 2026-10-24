@@ -18,7 +18,6 @@ type TechnicianStatsRow = {
   today: number;
   pending: number;
   inProgress: number;
-  completed: number;
   totalCompleted: number;
 };
 
@@ -47,10 +46,18 @@ export default async function TeamsPage() {
     db.$queryRaw<TechnicianStatsRow[]>`SELECT
       t."id" AS "technicianId",
       (SELECT count(*)::int FROM "ServiceAssignment" a WHERE a."technicianId" = t."id" AND a."assignedAt" >= ${start} AND a."assignedAt" < ${end}) AS "today",
-      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."currentTechnicianId" = t."id" AND c."status" NOT IN ('SERVICE_COMPLETED','CLOSED','CANCELLED')) AS "pending",
-      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."currentTechnicianId" = t."id" AND c."status" IN ('TECHNICIAN_VISITING','INSPECTION_STARTED','PROBLEM_DIAGNOSED','REPAIR_IN_PROGRESS')) AS "inProgress",
-      (SELECT count(*)::int FROM "ServiceRecord" s WHERE s."technicianId" = t."id" AND s."serviceDate" >= ${start} AND s."serviceDate" < ${end}) AS "completed",
-      (SELECT count(*)::int FROM "ServiceRecord" s WHERE s."technicianId" = t."id") AS "totalCompleted"
+      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."status" NOT IN ('SERVICE_COMPLETED','CLOSED','CANCELLED') AND EXISTS (SELECT 1 FROM "ServiceAssignment" a WHERE a."complaintId" = c."id" AND a."technicianId" = t."id" AND a."isActive" = true)) AS "pending",
+      (SELECT count(*)::int FROM "ServiceComplaint" c WHERE c."status" IN ('TECHNICIAN_VISITING','INSPECTION_STARTED','PROBLEM_DIAGNOSED','REPAIR_IN_PROGRESS') AND EXISTS (SELECT 1 FROM "ServiceAssignment" a WHERE a."complaintId" = c."id" AND a."technicianId" = t."id" AND a."isActive" = true)) AS "inProgress",
+      (SELECT count(*)::int
+       FROM "ServiceRecord" s
+       WHERE s."technicianId" = t."id"
+          OR EXISTS (
+            SELECT 1
+            FROM "ServiceAssignment" a
+            WHERE a."complaintId" = s."complaintId"
+              AND a."technicianId" = t."id"
+              AND a."endedReason" = 'Service completed'
+          )) AS "totalCompleted"
     FROM "Technician" t`,
   ]);
   const statsByTechnician = new Map(
@@ -61,7 +68,6 @@ export default async function TeamsPage() {
     today: statsByTechnician.get(technician.id)?.today ?? 0,
     pending: statsByTechnician.get(technician.id)?.pending ?? 0,
     inProgress: statsByTechnician.get(technician.id)?.inProgress ?? 0,
-    completed: statsByTechnician.get(technician.id)?.completed ?? 0,
     totalCompleted: statsByTechnician.get(technician.id)?.totalCompleted ?? 0,
   }));
 
@@ -108,7 +114,7 @@ export default async function TeamsPage() {
             Your account does not have technician assignment permission.
           </div>
         ) : (
-          <div className="grid gap-6 2xl:grid-cols-[1.25fr_.75fr]">
+          <div>
             <Card>
               <CardHeader
                 title={`Unassigned Complaints (${complaints.length})`}
@@ -182,74 +188,6 @@ export default async function TeamsPage() {
               </CardBody>
             </Card>
 
-            <Card>
-              <CardHeader
-                title="Technician Workload"
-                subtitle="Availability and workload at a glance."
-              />
-              <CardBody className="space-y-3">
-                {technicianStats.length === 0 ? (
-                  <div className="rounded-xl bg-brand-subtle p-5 text-sm text-brand-muted">
-                    No technicians added yet.
-                  </div>
-                ) : (
-                  technicianStats.map((technician) => (
-                    <div
-                      key={technician.id}
-                      className="rounded-2xl border border-brand-border bg-brand-subtle p-4"
-                    >
-                      <div className="flex items-center justify-between">
-                        <Link
-                          className="font-bold hover:underline"
-                          href={`/technicians/${technician.id}`}
-                        >
-                          {technician.name}
-                        </Link>
-                        <Badge value={technician.status} />
-                      </div>
-                      <div className="mt-1 text-xs text-brand-muted">
-                        {technician.mobile} -{" "}
-                        {technician.specialization ?? "General Service"}
-                      </div>
-                      <div className="mt-4 grid grid-cols-4 gap-2 text-center">
-                        <div>
-                          <div className="text-lg font-bold">
-                            {technician.today}
-                          </div>
-                          <div className="text-[10px] uppercase text-brand-muted">
-                            Today
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-lg font-bold">
-                            {technician.pending}
-                          </div>
-                          <div className="text-[10px] uppercase text-brand-muted">
-                            Pending
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-lg font-bold">
-                            {technician.inProgress}
-                          </div>
-                          <div className="text-[10px] uppercase text-brand-muted">
-                            Progress
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-lg font-bold">
-                            {technician.completed}
-                          </div>
-                          <div className="text-[10px] uppercase text-brand-muted">
-                            Done
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardBody>
-            </Card>
           </div>
         )}
       </section>
@@ -280,23 +218,37 @@ export default async function TeamsPage() {
                   <th>Mobile</th>
                   <th>Specialization</th>
                   <th>Status</th>
-                  <th>Pending Jobs</th>
-                  <th>Total Services</th>
-                  {current.role === "ADMIN" && <th>Action</th>}
+                  <th style={{ textAlign: "center" }}>Today</th>
+                  <th style={{ textAlign: "center" }}>Progress</th>
+                  <th style={{ textAlign: "center" }}>Pending Jobs</th>
+                  <th style={{ textAlign: "center" }}>Total Services</th>
+                  {current.role === "ADMIN" && (
+                    <th style={{ textAlign: "center" }}>Action</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {technicianStats.map((technician) => (
                   <tr key={technician.id}>
                     <td>
-                      <Link
-                        className="link"
-                        href={`/technicians/${technician.id}`}
-                      >
-                        {technician.name}
-                      </Link>
-                      <div className="text-xs text-brand-muted">
-                        {technician.technicianCode}
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-brand-border bg-brand-faint text-sm font-bold text-brand-primary">
+                          {technician.photoUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={technician.photoUrl} alt="" className="h-full w-full object-cover" />
+                          ) : technician.name.slice(0, 1).toUpperCase()}
+                        </div>
+                        <div>
+                          <Link
+                            className="link"
+                            href={`/technicians/${technician.id}`}
+                          >
+                            {technician.name}
+                          </Link>
+                          <div className="text-xs text-brand-muted">
+                            {technician.technicianCode}
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td>{technician.mobile}</td>
@@ -304,11 +256,13 @@ export default async function TeamsPage() {
                     <td>
                       <Badge value={technician.status} />
                     </td>
-                    <td>{technician.pending}</td>
-                    <td>{technician.totalCompleted}</td>
+                    <td className="text-center">{technician.today}</td>
+                    <td className="text-center">{technician.inProgress}</td>
+                    <td className="text-center">{technician.pending}</td>
+                    <td className="text-center">{technician.totalCompleted}</td>
                     {current.role === "ADMIN" && (
-                      <td>
-                        <div className="flex flex-wrap items-center gap-2">
+                      <td className="text-center">
+                        <div className="flex flex-wrap items-center justify-center gap-2">
                           <Link
                             href={`/technicians/${technician.id}/edit`}
                             className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"

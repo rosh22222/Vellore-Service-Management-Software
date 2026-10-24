@@ -53,7 +53,14 @@ export default async function CustomerDetail({
             notIn: terminalComplaintStatuses,
           },
         },
-        include: { equipment: true, currentTechnician: true },
+        include: {
+          equipment: true,
+          assignments: {
+            where: { isActive: true },
+            include: { technician: true },
+            orderBy: { assignedAt: "asc" },
+          },
+        },
         orderBy: { complaintDate: "desc" },
       },
       serviceRecords: {
@@ -457,7 +464,9 @@ export default async function CustomerDetail({
                     <td>{complaint.equipment?.name || "Not selected"}</td>
                     <td className="max-w-md">{complaint.customerComplaint}</td>
                     <td>
-                      {complaint.currentTechnician?.name || "Not assigned"}
+                      {complaint.assignments.length
+                        ? complaint.assignments.map((assignment) => assignment.technician.name).join(", ")
+                        : "Not assigned"}
                     </td>
                     <td>
                       <Badge value={complaint.status} />

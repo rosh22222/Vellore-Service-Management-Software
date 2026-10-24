@@ -1,7 +1,7 @@
 import { ActionForm } from "@/components/action-form";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ServiceStatus, TechnicianStatus } from "@prisma/client";
+import { Prisma, ServiceStatus, TechnicianStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireRoles } from "@/lib/auth";
 import {
@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { date, titleCase } from "@/lib/format";
+import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
 
 export default async function TechnicianDetail({
   params,
@@ -28,37 +29,55 @@ export default async function TechnicianDetail({
   const t = await db.technician.findUnique({
     where: { id },
     include: {
-      currentComplaints: {
+      assignments: {
         where: {
-          status: {
-            notIn: [
-              ServiceStatus.SERVICE_COMPLETED,
-              ServiceStatus.CLOSED,
-              ServiceStatus.CANCELLED,
-            ],
+          isActive: true,
+          complaint: {
+            status: {
+              notIn: [
+                ServiceStatus.SERVICE_COMPLETED,
+                ServiceStatus.CLOSED,
+                ServiceStatus.CANCELLED,
+              ],
+            },
           },
         },
-        include: { customer: true, equipment: true },
-        orderBy: { complaintDate: "desc" },
-      },
-      serviceRecords: {
-        include: { customer: true, equipment: true },
-        orderBy: { serviceDate: "desc" },
-        take: 20,
+        include: {
+          complaint: { include: { customer: true, equipment: true } },
+        },
+        orderBy: { assignedAt: "desc" },
       },
       user: true,
-      _count: { select: { serviceRecords: true } },
     },
   });
   if (!t) notFound();
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const [today, done] = await Promise.all([
+  const completedServiceWhere = {
+    OR: [
+      { technicianId: id },
+      {
+        complaint: {
+          assignments: {
+            some: { technicianId: id, endedReason: "Service completed" },
+          },
+        },
+      },
+    ],
+  } satisfies Prisma.ServiceRecordWhereInput;
+  const [today, done, serviceTotal, serviceRecords] = await Promise.all([
     db.serviceAssignment.count({
       where: { technicianId: id, assignedAt: { gte: start } },
     }),
     db.serviceRecord.count({
-      where: { technicianId: id, serviceDate: { gte: start } },
+      where: { AND: [completedServiceWhere, { serviceDate: { gte: start } }] },
+    }),
+    db.serviceRecord.count({ where: completedServiceWhere }),
+    db.serviceRecord.findMany({
+      where: completedServiceWhere,
+      include: { customer: true, equipment: true },
+      orderBy: { serviceDate: "desc" },
+      take: 20,
     }),
   ]);
   return (
@@ -93,14 +112,26 @@ export default async function TechnicianDetail({
         }
       />
       {updated === "1" && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-800 shadow-sm">
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-800 shadow-sm">
           Technician profile and linked login details updated successfully.
-        </div>
+        </AutoDismissNotice>
       )}
       <div className="grid gap-6 xl:grid-cols-[.8fr_1.2fr]">
         <Card>
           <CardHeader title="Profile" />
           <CardBody className="space-y-4">
+            <div className="flex items-center gap-4 rounded-2xl border border-brand-border bg-brand-faint/60 p-4">
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-brand-border bg-white text-2xl font-bold text-brand-primary shadow-sm">
+                {t.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={t.photoUrl} alt={t.name} className="h-full w-full object-cover" />
+                ) : t.name.slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-lg font-bold text-brand-ink">{t.name}</div>
+                <div className="text-sm text-brand-muted">{t.technicianCode}</div>
+              </div>
+            </div>
             <div>
               <div className="label">Specialization</div>
               <div className="value">{t.specialization ?? "—"}</div>
@@ -115,7 +146,7 @@ export default async function TechnicianDetail({
                 <div className="text-xs text-brand-muted">Today</div>
               </div>
               <div>
-                <b className="text-xl">{t.currentComplaints.length}</b>
+                <b className="text-xl">{t.assignments.length}</b>
                 <div className="text-xs text-brand-muted">Pending</div>
               </div>
               <div>
@@ -123,7 +154,7 @@ export default async function TechnicianDetail({
                 <div className="text-xs text-brand-muted">Done Today</div>
               </div>
               <div>
-                <b className="text-xl">{t._count.serviceRecords}</b>
+                <b className="text-xl">{serviceTotal}</b>
                 <div className="text-xs text-brand-muted">Total Services</div>
               </div>
             </div>
@@ -164,7 +195,7 @@ export default async function TechnicianDetail({
                 </tr>
               </thead>
               <tbody>
-                {t.currentComplaints.map((c) => (
+                {t.assignments.map(({ complaint: c }) => (
                   <tr key={c.id}>
                     <td>
                       <Link className="link" href={`/complaints/${c.id}`}>
@@ -198,7 +229,7 @@ export default async function TechnicianDetail({
               </tr>
             </thead>
             <tbody>
-              {t.serviceRecords.map((s) => (
+              {serviceRecords.map((s) => (
                 <tr key={s.id}>
                   <td>
                     <Link className="link" href={`/service-history/${s.id}`}>

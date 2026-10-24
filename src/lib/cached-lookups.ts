@@ -55,6 +55,34 @@ export const getCachedCustomerOptions = unstable_cache(
   { revalidate: 5 * 60, tags: ["customer-options"] },
 );
 
+// Complaint registration also needs invoice references so office staff can
+// find a customer without scrolling through a large customer list.
+export const getCachedComplaintCustomerOptions = unstable_cache(
+  async () => {
+    const customers = await db.customer.findMany({
+      select: {
+        id: true,
+        name: true,
+        primaryMobile: true,
+        address: true,
+        city: true,
+        billDetails: {
+          select: { billNumber: true },
+          orderBy: { billDate: "desc" },
+        },
+      },
+      orderBy: { name: "asc" },
+      take: 1000,
+    });
+    return customers.map(({ billDetails, ...customer }) => ({
+      ...customer,
+      invoiceNumbers: billDetails.map((bill) => bill.billNumber),
+    }));
+  },
+  ["complaint-customer-options-v1"],
+  { revalidate: 5 * 60, tags: ["customer-options"] },
+);
+
 export const getCachedEquipmentOptions = unstable_cache(
   async () =>
     db.customerEquipment.findMany({

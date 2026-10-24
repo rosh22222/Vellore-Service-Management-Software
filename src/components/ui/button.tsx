@@ -22,7 +22,7 @@ const variantClasses: Record<ButtonVariant, string> = {
 export function Button({
   children,
   className = "",
-  loadingText = "Please wait...",
+  loadingText: _loadingText = "Please wait...",
   variant = "primary",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -42,10 +42,7 @@ export function Button({
       aria-busy={isLoading}
       className={`inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-primary disabled:cursor-not-allowed disabled:border-brand-border disabled:bg-brand-subtle disabled:text-brand-muted disabled:shadow-none ${variantClasses[variant]} ${className}`}
     >
-      {isLoading && (
-        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-80" />
-      )}
-      {isLoading ? loadingText : children}
+      {children}
     </button>
   );
 }

@@ -9,6 +9,8 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { titleCase } from "@/lib/format";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { PinCodeInput } from "@/components/ui/pin-code-input";
 export default async function EditCustomer({
   params,
 }: {
@@ -40,14 +42,14 @@ export default async function EditCustomer({
               <Input name="name" defaultValue={c.name} required />
             </Field>
             <Field label="Primary Mobile" required>
-              <Input
+              <PhoneInput
                 name="primaryMobile"
                 defaultValue={c.primaryMobile}
                 required
               />
             </Field>
             <Field label="Alternate Mobile">
-              <Input
+              <PhoneInput
                 name="alternateMobile"
                 defaultValue={c.alternateMobile ?? ""}
               />
@@ -65,7 +67,7 @@ export default async function EditCustomer({
               <Input name="state" defaultValue={c.state} required />
             </Field>
             <Field label="PIN Code" required>
-              <Input name="pinCode" defaultValue={c.pinCode ?? ""} required />
+              <PinCodeInput name="pinCode" defaultValue={c.pinCode ?? ""} required />
             </Field>
             <Field label="GST">
               <Input name="gstNumber" defaultValue={c.gstNumber ?? ""} />

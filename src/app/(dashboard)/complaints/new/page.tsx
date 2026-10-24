@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { ComplaintForm } from "@/components/complaint-form";
 import {
-  getCachedCustomerOptions,
+  getCachedComplaintCustomerOptions,
   getCachedEquipmentOptions,
   getCachedTechnicianOptions,
 } from "@/lib/cached-lookups";
@@ -18,7 +18,7 @@ export default async function NewComplaintPage({
   const canAssign = user.role === "ADMIN" || user.canAssignTechnician;
   const { customerId, equipmentId } = await searchParams;
   const [customers, equipment, technicianOptions] = await Promise.all([
-    getCachedCustomerOptions(),
+    getCachedComplaintCustomerOptions(),
     getCachedEquipmentOptions(),
     canAssign ? getCachedTechnicianOptions() : Promise.resolve([]),
   ]);

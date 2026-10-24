@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, LoaderCircle, UserRound } from "lucide-react";
 import { Input } from "@/components/ui/form";
 import { LoginPasswordInput } from "@/components/login-password-input";
+import { DismissibleErrorDialog } from "@/components/dismissible-error-dialog";
 
 export function LoginForm() {
   const router = useRouter();
@@ -61,7 +62,6 @@ export function LoginForm() {
             required
             disabled={loading}
             aria-invalid={invalidCredentials}
-            aria-describedby={error ? "login-error" : undefined}
             placeholder="Enter your email or username"
             className="login-input"
           />
@@ -78,14 +78,15 @@ export function LoginForm() {
           required
           disabled={loading}
           aria-invalid={invalidCredentials}
-          aria-describedby={error ? "login-error" : undefined}
           placeholder="Enter your password"
         />
       </div>
       {error && (
-        <div id="login-error" role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-          {error}
-        </div>
+        <DismissibleErrorDialog
+          title="Sign-in unsuccessful"
+          message={error}
+          onClose={() => setError("")}
+        />
       )}
       <button type="submit" disabled={loading} aria-busy={loading} className="login-submit inline-flex w-full items-center justify-center gap-3 border border-brand-primary bg-brand-primary px-5 py-4 font-bold text-white transition-colors hover:bg-brand-primary-hover disabled:cursor-wait disabled:opacity-70">
         {loading ? <><LoaderCircle aria-hidden="true" size={21} className="animate-spin" /> Signing in…</> : <>Login <ArrowRight aria-hidden="true" size={21} /></>}

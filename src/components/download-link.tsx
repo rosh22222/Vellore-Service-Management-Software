@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState, type ReactNode } from "react";
 import { startLoading } from "@/lib/loading-feedback";
+import { DismissibleErrorDialog } from "@/components/dismissible-error-dialog";
 
 export function DownloadLink({ href, children, className, preview = false }: { href: string; children: ReactNode; className?: string; preview?: boolean }) {
   const [pending, setPending] = useState(false);
@@ -35,6 +36,6 @@ export function DownloadLink({ href, children, className, preview = false }: { h
     }}>
       {pending ? <><span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> Preparing…</> : children}
     </a>
-    {error && <span role="alert" className="max-w-xs text-xs text-rose-700">{error}</span>}
+    {error && <DismissibleErrorDialog message={error} onClose={() => setError("")} />}
   </span>;
 }

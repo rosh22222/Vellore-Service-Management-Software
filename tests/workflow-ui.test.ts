@@ -14,6 +14,8 @@ import { requiredEmail } from "../src/lib/technician-validation";
 import { NavigationFeedback } from "../src/components/navigation-feedback";
 import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { DownloadLink } from "../src/components/download-link";
+import { ConfirmSubmitButton } from "../src/components/confirm-submit-button";
+import { AutoDismissNotice } from "../src/components/auto-dismiss-notice";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/brands", pretendToBeVisual: true });
 for (const [key, value] of Object.entries({ React, window: dom.window, document: dom.window.document, navigator: dom.window.navigator, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, HTMLInputElement: dom.window.HTMLInputElement, HTMLFormElement: dom.window.HTMLFormElement, FormData: dom.window.FormData, requestAnimationFrame: (callback: FrameRequestCallback) => { callback(0); return 1; } })) Object.defineProperty(globalThis, key, { configurable: true, value });
@@ -81,6 +83,7 @@ test("brand success is specific, resets its input and disappears after three sec
     container.querySelector("input")!.value = "Test Brand";
     await act(async () => { container.querySelector("form")!.requestSubmit(); });
     assert.equal(isLoading(), true); assert.equal(container.querySelector("button")!.disabled, true);
+    assert.equal(container.querySelector("button")!.textContent, "Add Brand", "The full-screen loader handles progress without replacing the button label");
     await act(async () => { finish!(); });
     assert.equal(isLoading(), false); assert.equal(container.querySelector('[role="status"]')!.textContent!.trim(), "Brand Added");
     assert.equal(container.querySelector("input")!.value, "", "Adding a brand clears the name for the next entry");
@@ -88,8 +91,65 @@ test("brand success is specific, resets its input and disappears after three sec
     await act(async () => t.mock.timers.tick(1)); assert.equal(container.querySelector('[role="status"]'), null);
     await act(async () => root.render(React.createElement(ActionForm, { action: async () => { throw new Error("Brand already exists."); }, successDuration: 3000, children: React.createElement("button", null, "Save") })));
     await act(async () => container.querySelector("form")!.requestSubmit());
-    await act(async () => t.mock.timers.tick(4000)); assert.match(container.querySelector('[role="alert"]')!.textContent!, /Brand already exists/);
+    await act(async () => t.mock.timers.tick(4000));
+    const errorDialog = document.querySelector('[role="alertdialog"]')!;
+    assert.match(errorDialog.textContent!, /Brand already exists/);
+    assert(errorDialog.parentElement!.className.includes("fixed"), "Action error must be centered in a modal overlay");
+    const close = errorDialog.querySelector<HTMLButtonElement>('button[aria-label="Close message"]')!;
+    await act(async () => close.click());
+    assert.equal(document.querySelector('[role="alertdialog"]'), null);
   } finally { await act(async () => root.unmount()); container.remove(); t.mock.timers.reset(); }
+});
+
+test("all success notices disappear after three seconds by default", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement("div", null,
+      React.createElement(AutoDismissNotice, null, "Profile updated"),
+      React.createElement(ActionForm, { action: async () => {}, children: React.createElement(Button, null, "Update") }),
+    )));
+    assert.match(container.textContent!, /Profile updated/);
+    await act(async () => container.querySelector("form")!.requestSubmit());
+    assert.match(container.textContent!, /Changes saved successfully/);
+    await act(async () => t.mock.timers.tick(2999));
+    assert.match(container.textContent!, /Profile updated/);
+    await act(async () => t.mock.timers.tick(1));
+    assert(!container.textContent!.includes("Profile updated"));
+    assert(!container.textContent!.includes("Changes saved successfully"));
+  } finally { await act(async () => root.unmount()); container.remove(); t.mock.timers.reset(); }
+});
+
+test("delete actions use the custom confirmation dialog instead of browser confirm", async () => {
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  let deletions = 0;
+  const originalConfirm = window.confirm;
+  window.confirm = () => { throw new Error("Browser confirmation must not be used"); };
+  try {
+    await act(async () => root.render(React.createElement(ActionForm, {
+      action: async () => { deletions++; },
+      children: React.createElement(ConfirmSubmitButton, { message: "Delete this test record?", children: "Delete Record" }),
+    })));
+    await act(async () => container.querySelector("button")!.click());
+    const dialog = document.querySelector('[role="alertdialog"]')!;
+    assert(dialog);
+    assert.match(dialog.textContent!, /Are you sure\?/);
+    assert.match(dialog.textContent!, /Delete this test record/);
+    assert.equal(deletions, 0);
+    const cancel = [...dialog.querySelectorAll("button")].find(button => button.textContent === "Cancel")!;
+    await act(async () => cancel.click());
+    assert.equal(document.querySelector('[role="alertdialog"]'), null);
+
+    await act(async () => container.querySelector("button")!.click());
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find(button => button.textContent?.trim() === "Delete")!;
+    await act(async () => confirm.click());
+    assert.equal(deletions, 1);
+    assert.equal(document.querySelector('[role="alertdialog"]'), null);
+  } finally {
+    window.confirm = originalConfirm;
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });
 
 test("new complaint exposes Technician and Office Notes, not New Equipment or its fields", async () => {
@@ -97,7 +157,9 @@ test("new complaint exposes Technician and Office Notes, not New Equipment or it
   try {
     await act(async () => root.render(React.createElement(ComplaintForm, { customers: [], equipment: [], customerTypes: ["GYM"], priorities: ["NORMAL"], sources: ["PHONE"], technicians: [{ id: "tech-1", name: "Test Technician" }], canAssign: true })));
     assert(!container.textContent!.includes("New Equipment")); assert.equal(container.querySelector('input[name="newEquipmentName"]'), null);
-    assert.equal(container.querySelector<HTMLSelectElement>('select[name="technicianId"]')!.disabled, false);
+    const technician = container.querySelector<HTMLInputElement>('input[name="technicianIds"]');
+    assert(technician);
+    assert.equal(technician.disabled, false);
     assert.match(container.querySelector('textarea[name="notes"]')!.closest("label")!.textContent!, /Office Notes/);
   } finally { await act(async () => root.unmount()); container.remove(); }
 });
@@ -138,7 +200,7 @@ test("report downloads show busy feedback, prevent duplicate requests and preser
     assert.equal(isLoading(), false); assert.equal(filename, "VFE-report.csv"); assert.equal(link.textContent, "Export CSV");
     await act(async () => link.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
     await act(async () => finish(new Response("error", { status: 401 })));
-    assert.equal(isLoading(), false); assert.match(container.querySelector('[role="alert"]')!.textContent!, /session expired/);
+    assert.equal(isLoading(), false); assert.match(document.querySelector('[role="alertdialog"]')!.textContent!, /session expired/);
   } finally {
     await act(async () => root.unmount()); container.remove(); globalThis.fetch = originalFetch; URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; dom.window.HTMLAnchorElement.prototype.click = originalClick; window.setTimeout = originalTimer;
   }

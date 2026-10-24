@@ -2,7 +2,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { requireRoles } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { optionalString, requiredText } from "@/lib/format";
+import { optionalString, phoneNumber, requiredText } from "@/lib/format";
 
 export async function updateCompanySettings(formData: FormData) {
   const user = await requireRoles(["ADMIN"]);
@@ -12,10 +12,9 @@ export async function updateCompanySettings(formData: FormData) {
   const data = {
     companyName: requiredText(formData.get("companyName"), "Company name", 200),
     address: optionalString(formData.get("address")),
-    phone: optionalString(formData.get("phone")),
+    phone: phoneNumber(formData.get("phone"), "Phone number", false),
     email: optionalString(formData.get("email")),
     gstNumber: optionalString(formData.get("gstNumber")),
-    website: optionalString(formData.get("website")),
   };
   await db.$transaction(async (tx) => {
     await tx.companySetting.upsert({

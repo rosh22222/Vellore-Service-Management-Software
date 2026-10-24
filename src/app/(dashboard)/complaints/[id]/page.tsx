@@ -3,15 +3,12 @@ import { EquipmentSelect } from "@/components/equipment-select";
 import { equipmentLabel } from "@/lib/equipment-label";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PaymentMode, ServiceStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireRoles } from "@/lib/auth";
 import {
   assignTechnicianFromForm,
+  unassignTechnicianFromForm,
   linkComplaintEquipmentFromForm,
-  updateServiceStatusFromForm,
-  saveInspectionFromForm,
-  addWorkLogFromForm,
   completeServiceFromForm,
 } from "@/actions/complaint";
 import { PageHeader } from "@/components/ui/page";
@@ -69,8 +66,20 @@ export default async function ComplaintDetailPage({
     c.serviceRecord?.serviceDate ?? new Date(),
   );
   const canAssign = user.role === "ADMIN" || user.canAssignTechnician;
+  const assignedTechnicianIds = new Set(
+    c.assignments
+      .filter((assignment) => assignment.isActive)
+      .map((assignment) => assignment.technicianId),
+  );
   const activeTechnicians = technicians.filter(
-    (technician) => technician.status !== "INACTIVE",
+    (technician) =>
+      technician.status !== "INACTIVE" &&
+      technician.status !== "ON_LEAVE" &&
+      !assignedTechnicianIds.has(technician.id),
+  );
+  const assignmentSummary = summarizeAssignments(c.assignments);
+  const activeAssignments = c.assignments.filter(
+    (assignment) => assignment.isActive,
   );
   return (
     <>
@@ -295,7 +304,7 @@ export default async function ComplaintDetailPage({
         <Card className="mt-6">
           <CardHeader
             title="Technician Assignment"
-            subtitle="Assign or reassign while preserving complete assignment history."
+            subtitle="Add one or more technicians to work on this service complaint."
           />
           <CardBody>
             <ActionForm
@@ -307,7 +316,8 @@ export default async function ComplaintDetailPage({
                 <Select
                   name="technicianId"
                   required
-                  defaultValue={c.currentTechnicianId ?? ""}
+                  defaultValue=""
+                  disabled={activeTechnicians.length === 0}
                 >
                   <option value="">Select technician</option>
                   {activeTechnicians.map((t) => (
@@ -317,20 +327,15 @@ export default async function ComplaintDetailPage({
                   ))}
                 </Select>
               </Field>
-              <Field label="Reason / Note" required={Boolean(c.currentTechnicianId)}>
+              <Field label="Assignment Note">
                 <Input
                   name="reason"
-                  required={Boolean(c.currentTechnicianId)}
-                  placeholder={
-                    c.currentTechnician
-                      ? "Reason for reassignment"
-                      : "Initial assignment"
-                  }
+                  placeholder="Optional work or visit instruction"
                 />
               </Field>
               <div className="self-end">
-                <Button type="submit">
-                  {c.currentTechnician ? "Reassign" : "Assign"}
+                <Button type="submit" disabled={activeTechnicians.length === 0}>
+                  Add Technician
                 </Button>
               </div>
             </ActionForm>
@@ -345,26 +350,38 @@ export default async function ComplaintDetailPage({
                       <th>Ended</th>
                       <th>Assignment Note</th>
                       <th>Ended Reason</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {c.assignments.map((a) => (
-                      <tr key={a.id}>
+                    <tr>
+                        <td className="font-semibold">{assignmentSummary.technicians}</td>
+                        <td>{assignmentSummary.assignedBy}</td>
+                        <td>{assignmentSummary.assignedAt}</td>
+                        <td>{assignmentSummary.endedAt}</td>
+                        <td>{assignmentSummary.notes}</td>
+                        <td>{assignmentSummary.endedReasons}</td>
                         <td>
-                          {a.technician.name}
-                          {a.isActive && (
-                            <span className="ml-2 text-xs font-semibold text-emerald-600">
-                              Current
-                            </span>
+                          {activeAssignments.length ? (
+                            <div className="flex flex-wrap gap-2">
+                              {activeAssignments.map((assignment) => (
+                                <ActionForm
+                                  key={assignment.id}
+                                  action={unassignTechnicianFromForm}
+                                >
+                                  <input type="hidden" name="complaintId" value={c.id} />
+                                  <input type="hidden" name="technicianId" value={assignment.technicianId} />
+                                  <Button type="submit" variant="secondary" className="px-3 py-2 text-xs">
+                                    Remove {assignment.technician.name}
+                                  </Button>
+                                </ActionForm>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-brand-muted">History</span>
                           )}
                         </td>
-                        <td>{a.assignedBy.name}</td>
-                        <td>{date(a.assignedAt, true)}</td>
-                        <td>{date(a.unassignedAt, true)}</td>
-                        <td>{a.reason ?? "—"}</td>
-                        <td>{a.endedReason ?? "—"}</td>
-                      </tr>
-                    ))}
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -373,134 +390,38 @@ export default async function ComplaintDetailPage({
         </Card>
       )}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader title="Inspection / Actual Problem" />
-          <CardBody>
-            {c.inspection && (
-              <div className="mb-5 space-y-4 rounded-2xl bg-brand-subtle p-4">
-                <div>
-                  <div className="label">Inspection Findings</div>
-                  <div className="value whitespace-pre-line">
-                    {c.inspection.findings}
-                  </div>
-                </div>
-                <div>
-                  <div className="label">Actual Problem Found</div>
-                  <div className="value font-semibold">
-                    {c.inspection.actualProblem}
-                  </div>
-                </div>
-              </div>
-            )}
-            {!complete && (
-              <ActionForm action={saveInspectionFromForm} className="space-y-4">
+      {!complete && (
+        <div className="mt-6">
+          <Card>
+            <CardHeader
+              title="Complete Service"
+              subtitle="Record what was found, what was done and the final service amount in one step."
+            />
+            <CardBody>
+              <ActionForm action={completeServiceFromForm} className="grid gap-5 md:grid-cols-2">
                 <input type="hidden" name="complaintId" value={c.id} />
-                <Field label="Inspection Findings" required>
-                  <Textarea
-                    name="findings"
-                    required
-                    defaultValue={c.inspection?.findings ?? ""}
-                  />
-                </Field>
+                <div className="md:col-span-2">
+                  <Field
+                    label="Customer Complaint / Problem Reported"
+                    hint="Copied from complaint registration for technician reference."
+                  >
+                    <Textarea value={c.customerComplaint} readOnly rows={3} />
+                  </Field>
+                </div>
                 <Field label="Actual Problem Found" required>
                   <Textarea
                     name="actualProblem"
                     required
                     defaultValue={c.inspection?.actualProblem ?? ""}
+                    placeholder="Describe the actual fault found during service."
                   />
                 </Field>
-                <Button type="submit">Save Diagnosis</Button>
-              </ActionForm>
-            )}
-          </CardBody>
-        </Card>
-        <Card>
-          <CardHeader title="Work Done" />
-          <CardBody>
-            <div className="space-y-3">
-              {c.workLogs.map((w) => (
-                <div
-                  key={w.id}
-                  className="rounded-xl border border-brand-border bg-brand-subtle p-4"
-                >
-                  <div className="whitespace-pre-line font-medium text-[#1E293B]">
-                    {w.workDone}
-                  </div>
-                  {w.notes && (
-                    <div className="mt-2 text-sm text-brand-muted">{w.notes}</div>
-                  )}
-                  <div className="mt-2 text-xs text-brand-muted">
-                    {w.createdBy.name} • {date(w.createdAt, true)}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {!complete && (
-              <ActionForm action={addWorkLogFromForm} className="mt-5 space-y-4">
-                <input type="hidden" name="complaintId" value={c.id} />
                 <Field label="Work Performed" required>
                   <Textarea
                     name="workDone"
                     required
-                    placeholder="Drive belt tightened, motor belt aligned, lubrication completed…"
-                  />
-                </Field>
-                <Field label="Notes">
-                  <Input name="notes" />
-                </Field>
-                <Button type="submit">Add Work Log</Button>
-              </ActionForm>
-            )}
-          </CardBody>
-        </Card>
-      </div>
-
-      {!complete && (
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <Card>
-            <CardHeader title="Update Status" />
-            <CardBody>
-              <ActionForm action={updateServiceStatusFromForm} className="space-y-4">
-                <input type="hidden" name="complaintId" value={c.id} />
-                <Field label="Status">
-                  <Select name="status" defaultValue={c.status}>
-                    {Object.values(ServiceStatus)
-                      .filter(
-                        (v) =>
-                          v !== ServiceStatus.SERVICE_COMPLETED &&
-                          v !== ServiceStatus.WAITING_FOR_CUSTOMER_APPROVAL,
-                      )
-                      .map((v) => (
-                        <option key={v} value={v}>
-                          {titleCase(v)}
-                        </option>
-                      ))}
-                  </Select>
-                </Field>
-                <Field label="Status Note">
-                  <Input name="notes" />
-                </Field>
-                <Button type="submit">Update Status</Button>
-              </ActionForm>
-            </CardBody>
-          </Card>
-          <Card>
-            <CardHeader
-              title="Complete Service"
-              subtitle="Creates the permanent immutable service record."
-            />
-            <CardBody>
-              <ActionForm action={completeServiceFromForm} className="space-y-4">
-                <input type="hidden" name="complaintId" value={c.id} />
-                <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-                  Required: assigned technician, Problem Found, and Work Done.
-                </div>
-                <Field label="Completion Notes" required>
-                  <Textarea
-                    name="completionNotes"
-                    required
-                    placeholder="Machine tested successfully and handed over to customer."
+                    defaultValue={c.workLogs.map((work) => work.workDone).join("\n")}
+                    placeholder="Describe the repair or service work completed."
                   />
                 </Field>
                 <Field
@@ -511,38 +432,20 @@ export default async function ComplaintDetailPage({
                   <Input
                     name="charges"
                     required
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="\d+(\.\d{1,2})?"
+                    title="Enter an amount using numbers with up to two decimal places."
                     defaultValue="0"
                   />
                 </Field>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field
-                    label="Collected Now"
-                    hint="Enter 0 if customer will pay later."
-                  >
-                    <Input
-                      name="collectedNow"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      defaultValue="0"
-                    />
-                  </Field>
-                  <Field label="Payment Mode">
-                    <Select name="paymentMode" defaultValue={PaymentMode.CASH}>
-                      {Object.values(PaymentMode).map((mode) => (
-                        <option key={mode} value={mode}>
-                          {titleCase(mode)}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
+                <div className="self-end rounded-xl border border-brand-border bg-brand-faint p-4 text-sm text-brand-secondary">
+                  Payments can be recorded later from <b>Service Collections</b>.
                 </div>
                 <Button
                   type="submit"
                   variant="success"
+                  className="md:col-span-2 md:justify-self-start"
                 >
                   Complete & Create Permanent Record
                 </Button>
@@ -581,6 +484,36 @@ export default async function ComplaintDetailPage({
       </Card>
     </>
   );
+}
+
+function summarizeAssignments(
+  assignments: Array<{
+    technician: { name: string };
+    assignedBy: { name: string };
+    assignedAt: Date;
+    unassignedAt: Date | null;
+    reason: string | null;
+    endedReason: string | null;
+  }>,
+) {
+  const join = (values: Array<string | null | undefined>, separator = " / ") => {
+    const unique = Array.from(
+      new Set(values.filter((value): value is string => Boolean(value))),
+    );
+    return unique.join(separator) || "—";
+  };
+  return {
+    technicians: join(assignments.map((item) => item.technician.name), " & "),
+    assignedBy: join(assignments.map((item) => item.assignedBy.name), " & "),
+    assignedAt: join(assignments.map((item) => date(item.assignedAt, true))),
+    endedAt: join(
+      assignments
+        .filter((item) => item.unassignedAt)
+        .map((item) => date(item.unassignedAt, true)),
+    ),
+    notes: join(assignments.map((item) => item.reason)),
+    endedReasons: join(assignments.map((item) => item.endedReason)),
+  };
 }
 
 

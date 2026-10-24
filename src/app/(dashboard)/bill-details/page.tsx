@@ -11,6 +11,8 @@ import { deleteBillDetailFromForm } from "@/actions/bill-detail";
 import { date, money } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
 import { BillEditPanel } from "@/components/bill-edit-panel";
+import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
+import { DismissibleErrorDialog } from "@/components/dismissible-error-dialog";
 
 export default async function BillDetailsPage({
   searchParams,
@@ -21,10 +23,11 @@ export default async function BillDetailsPage({
     deleted?: string;
     customerDeleted?: string;
     editBill?: string;
+    editBlocked?: string;
   }>;
 }) {
   await requireRoles(["ADMIN", "OFFICE_STAFF"]);
-  const { q = "", deleteBlocked, deleted, customerDeleted, editBill } =
+  const { q = "", deleteBlocked, deleted, customerDeleted, editBill, editBlocked } =
     await searchParams;
   if (editBill) return <BillEditPanel id={editBill} />;
   const query = q.trim();
@@ -96,18 +99,27 @@ export default async function BillDetailsPage({
       />
 
       {deleteBlocked && (
-        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 shadow-sm">
-          <div className="font-bold">Bill cannot be deleted safely.</div>
-          <div className="mt-1 leading-6">
+        <DismissibleErrorDialog
+          title="Bill cannot be deleted safely"
+          message={
+            <>
             One or more products in this bill already has complaint or service
             history. The software keeps those records safe, so old repair
             details do not disappear accidentally.
-          </div>
-        </div>
+            </>
+          }
+        />
+      )}
+
+      {editBlocked && (
+        <DismissibleErrorDialog
+          title="Bill cannot be edited"
+          message="Cannot edit this bill. A complaint has already been raised for a product on this invoice."
+        />
       )}
 
       {deleted && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
+        <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-sm">
           <div className="font-bold">Bill deleted successfully.</div>
           <div className="mt-1">
             Safe linked product records were also removed where no service work
@@ -116,7 +128,7 @@ export default async function BillDetailsPage({
               ? " The customer profile was also removed because it had no other records."
               : " The customer profile was kept if it had any other records."}
           </div>
-        </div>
+        </AutoDismissNotice>
       )}
 
       <div className="mb-6 grid gap-4 xl:grid-cols-[1.2fr_.8fr]">

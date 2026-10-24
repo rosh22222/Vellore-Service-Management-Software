@@ -6,24 +6,41 @@ import { redirect } from "next/navigation";
 import { requireRoles } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { nextDocumentNumber } from "@/lib/ids";
-import { optionalString } from "@/lib/format";
+import { optionalString, phoneNumber } from "@/lib/format";
 import { assertLoginIdentifiers, requiredEmail } from "@/lib/technician-validation";
+
+function technicianPhoto(value: FormDataEntryValue | null) {
+  const photo = String(value ?? "").trim();
+  if (!photo) return null;
+  if (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(photo)) {
+    if (photo.length > 900_000) throw new Error("Technician photo is too large. Choose a smaller image.");
+    return photo;
+  }
+  try {
+    const url = new URL(photo);
+    if (!['http:', 'https:'].includes(url.protocol) || photo.length > 2048) throw new Error();
+    return photo;
+  } catch {
+    throw new Error("Technician photo must be an uploaded image or a valid image link.");
+  }
+}
 
 export async function createTechnician(formData: FormData) {
   await requireRoles(["ADMIN"]);
   const name = String(formData.get("name") ?? "").trim();
-  const mobile = String(formData.get("mobile") ?? "").trim();
+  const mobile = phoneNumber(formData.get("mobile"), "Mobile number")!;
   const username = String(formData.get("username") ?? "")
     .trim()
     .toLowerCase();
   const password = String(formData.get("password") ?? "");
   const email = requiredEmail(formData.get("email"));
-  if (!name || !mobile || !username || password.length < 8)
+  if (!name || !username || password.length < 8)
     throw new Error(
       "Name, mobile, username and password (8+ chars) are required.",
     );
   const passwordHash = await bcrypt.hash(password, 12);
   const specialization = optionalString(formData.get("specialization"));
+  const photoUrl = technicianPhoto(formData.get("photoUrl"));
   const tech = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(713043)`;
     await assertLoginIdentifiers(tx, username, email);
@@ -49,6 +66,7 @@ export async function createTechnician(formData: FormData) {
         mobile,
         email,
         address: optionalString(formData.get("address")),
+        photoUrl,
         specialization,
         userId: user.id,
         status: TechnicianStatus.AVAILABLE,
@@ -72,15 +90,16 @@ export async function updateTechnician(id: string, formData: FormData) {
   if (!technician) throw new Error("Technician not found.");
 
   const name = String(formData.get("name") ?? "").trim();
-  const mobile = String(formData.get("mobile") ?? "").trim();
+  const mobile = phoneNumber(formData.get("mobile"), "Mobile number")!;
   const email = requiredEmail(formData.get("email"));
   const specialization = optionalString(formData.get("specialization"));
+  const photoUrl = technicianPhoto(formData.get("photoUrl"));
   const username = String(formData.get("username") ?? "")
     .trim()
     .toLowerCase();
   const newPassword = String(formData.get("newPassword") ?? "");
 
-  if (!name || !mobile) throw new Error("Name and mobile are required.");
+  if (!name) throw new Error("Name is required.");
   if (technician.user && !username)
     throw new Error("Login username is required.");
   if (newPassword && newPassword.length < 8)
@@ -100,6 +119,7 @@ export async function updateTechnician(id: string, formData: FormData) {
         mobile,
         email,
         address: optionalString(formData.get("address")),
+        photoUrl,
         specialization,
       },
     });
@@ -137,10 +157,13 @@ export async function setTechnicianStatus(id: string, formData: FormData) {
     status === TechnicianStatus.ON_LEAVE ||
     status === TechnicianStatus.INACTIVE
   ) {
-    const openJobs = await db.serviceComplaint.count({
+    const openJobs = await db.serviceAssignment.count({
       where: {
-        currentTechnicianId: id,
-        status: { notIn: ["SERVICE_COMPLETED", "CLOSED", "CANCELLED"] },
+        technicianId: id,
+        isActive: true,
+        complaint: {
+          status: { notIn: ["SERVICE_COMPLETED", "CLOSED", "CANCELLED"] },
+        },
       },
     });
     if (openJobs > 0)

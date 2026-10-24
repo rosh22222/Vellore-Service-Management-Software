@@ -8,6 +8,9 @@ import { createBillDetail, updateCompleteBill } from "@/actions/bill-detail";
 import { BillProductFields, type BillProductDefaultValues } from "@/components/bill-product-fields";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { PinCodeInput } from "@/components/ui/pin-code-input";
+import { StateCitySelects } from "@/components/state-city-selects";
 import { titleCase } from "@/lib/format";
 
 type Customer = {
@@ -157,7 +160,7 @@ export function BillDetailForm({
             <Input name="newCustomerName" required={isNewCustomer} defaultValue={editing?.customer.name ?? ""} />
           </Field>
           <Field label="Primary Mobile" required>
-            <Input
+            <PhoneInput
               name="newCustomerPrimaryMobile"
               defaultValue={editing?.customer.primaryMobile ?? ""}
               required={isNewCustomer}
@@ -165,7 +168,7 @@ export function BillDetailForm({
             />
           </Field>
           <Field label="Alternate Mobile">
-            <Input name="newCustomerAlternateMobile" inputMode="tel" defaultValue={editing?.customer.alternateMobile ?? ""} />
+            <PhoneInput name="newCustomerAlternateMobile" defaultValue={editing?.customer.alternateMobile ?? ""} />
           </Field>
           <Field label="Email">
             <Input name="newCustomerEmail" type="email" defaultValue={editing?.customer.email ?? ""} />
@@ -180,18 +183,15 @@ export function BillDetailForm({
               />
             </Field>
           </div>
-          <Field label="City" required>
-            <Input name="newCustomerCity" required={isNewCustomer} defaultValue={editing?.customer.city ?? ""} />
-          </Field>
-          <Field label="State" required>
-            <Input
-              name="newCustomerState"
-              required={isNewCustomer}
-              defaultValue={editing?.customer.state ?? "Tamil Nadu"}
-            />
-          </Field>
+          <StateCitySelects
+            stateName="newCustomerState"
+            cityName="newCustomerCity"
+            defaultState={editing?.customer.state ?? ""}
+            defaultCity={editing?.customer.city ?? ""}
+            required={isNewCustomer}
+          />
           <Field label="PIN Code" required>
-            <Input name="newCustomerPinCode" required={isNewCustomer} defaultValue={editing?.customer.pinCode ?? ""} />
+            <PinCodeInput name="newCustomerPinCode" required={isNewCustomer} defaultValue={editing?.customer.pinCode ?? ""} />
           </Field>
           <Field label="GST Number">
             <Input name="newCustomerGstNumber" defaultValue={editing?.customer.gstNumber ?? ""} />

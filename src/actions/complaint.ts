@@ -6,7 +6,6 @@ import {
   ComplaintSource,
   CustomerType,
   EquipmentStatus,
-  PaymentMode,
   Prisma,
   ServiceStatus,
   TechnicianStatus,
@@ -16,12 +15,14 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getCurrentUser, requireUser } from "@/lib/auth";
-import { nextDocumentNumber } from "@/lib/ids";
+import { nextDocumentNumber, nextDocumentNumbers } from "@/lib/ids";
 import {
+  indianPinCode,
   n,
   nonNegativeNumber,
   optionalDate,
   optionalString,
+  phoneNumber,
   requiredText,
 } from "@/lib/format";
 import { similarity } from "@/lib/similarity";
@@ -37,14 +38,22 @@ async function requireComplaintAccess(complaintId: string) {
   const user = await requireUser();
   const complaint = await db.serviceComplaint.findUnique({
     where: { id: complaintId },
-    include: { serviceRecord: true },
+    include: {
+      serviceRecord: true,
+      assignments: {
+        where: { isActive: true },
+        select: { technicianId: true },
+      },
+    },
   });
   if (!complaint) throw new Error("Complaint not found.");
   if (complaint.status === ServiceStatus.CANCELLED || complaint.status === ServiceStatus.CLOSED)
     throw new Error("This complaint is closed or cancelled and cannot be changed.");
   if (
     user.role === UserRole.TECHNICIAN &&
-    complaint.currentTechnicianId !== user.technicianId
+    !complaint.assignments.some(
+      (assignment) => assignment.technicianId === user.technicianId,
+    )
   )
     throw new Error("You are not assigned to this job.");
   return { user, complaint };
@@ -112,9 +121,26 @@ export async function createComplaint(formData: FormData) {
     throw new Error("Technicians cannot register office complaints.");
   const customerMode = String(formData.get("customerMode") || "existing");
   const equipmentMode = String(formData.get("equipmentMode") || "existing");
-  if (!["existing", "unknown"].includes(equipmentMode)) throw new Error("Choose existing equipment or Not Known. Add new products through Bill Details or Equipment.");
-  const technicianId = optionalString(formData.get("technicianId"));
-  if (technicianId && !canAssign(user)) throw new Error("You do not have technician assignment permission.");
+  if (!["existing", "new"].includes(customerMode))
+    throw new Error("Choose an existing or new customer.");
+  if (!["existing", "unknown"].includes(equipmentMode))
+    throw new Error(
+      "Choose existing equipment or Not Known. Add new products through Bill Details or Equipment.",
+    );
+  const technicianIds = [
+    ...new Set(
+      [
+        ...formData.getAll("technicianIds"),
+        formData.get("technicianId"),
+      ]
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (technicianIds.length > 10)
+    throw new Error("Select no more than 10 technicians for one complaint.");
+  if (technicianIds.length && !canAssign(user))
+    throw new Error("You do not have technician assignment permission.");
   const customerComplaint = requiredText(
     formData.get("customerComplaint"),
     "Customer complaint",
@@ -126,7 +152,7 @@ export async function createComplaint(formData: FormData) {
   if (!Object.values(ComplaintSource).includes(source as ComplaintSource))
     throw new Error("Invalid complaint source.");
 
-  const complaint = await db.$transaction(async (tx) => {
+  const complaints = await db.$transaction(async (tx) => {
     let customerId = String(formData.get("customerId") ?? "");
     if (customerMode === "new") {
       const type = requiredText(
@@ -136,11 +162,7 @@ export async function createComplaint(formData: FormData) {
       );
       if (!Object.values(CustomerType).includes(type as CustomerType))
         throw new Error("Invalid customer type.");
-      const pinCode = requiredText(
-        formData.get("newCustomerPinCode"),
-        "PIN Code",
-        20,
-      );
+      const pinCode = indianPinCode(formData.get("newCustomerPinCode"));
       const customerCode = await nextDocumentNumber(
         tx,
         "customer",
@@ -155,13 +177,14 @@ export async function createComplaint(formData: FormData) {
             "Customer name",
             200,
           ),
-          primaryMobile: requiredText(
+          primaryMobile: phoneNumber(
             formData.get("newCustomerPrimaryMobile"),
             "Primary mobile",
-            30,
-          ),
-          alternateMobile: optionalString(
+          )!,
+          alternateMobile: phoneNumber(
             formData.get("newCustomerAlternateMobile"),
+            "Alternate mobile",
+            false,
           ),
           email: optionalString(formData.get("newCustomerEmail")),
           address: requiredText(
@@ -186,72 +209,121 @@ export async function createComplaint(formData: FormData) {
       if (!customer) throw new Error("Customer not found.");
     }
 
-    let equipmentId: string | null = null;
+    let equipmentIds: Array<string | null> = [null];
     if (equipmentMode === "existing") {
       if (customerMode === "new")
         throw new Error("A new customer cannot use existing equipment.");
-      equipmentId = requiredText(formData.get("equipmentId"), "Equipment");
-      if (equipmentId) {
+      const selectedEquipmentIds = [
+        ...new Set(
+          [
+            ...formData.getAll("equipmentIds"),
+            formData.get("equipmentId"),
+          ]
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (!selectedEquipmentIds.length)
+        throw new Error("Select at least one equipment.");
+      if (selectedEquipmentIds.length > 25)
+        throw new Error("Select no more than 25 equipment items at one time.");
+
+      for (const equipmentId of [...selectedEquipmentIds].sort())
         await lockEquipmentBills(tx, equipmentId);
-        const equipment = await tx.customerEquipment.findUnique({
-          where: { id: equipmentId },
-          select: { customerId: true },
-        });
-        if (!equipment || equipment.customerId !== customerId)
-          throw new Error(
-            "The selected equipment does not belong to this customer.",
-          );
-      }
+      const selectedEquipment = await tx.customerEquipment.findMany({
+        where: { id: { in: selectedEquipmentIds } },
+        select: { id: true, customerId: true },
+      });
+      if (
+        selectedEquipment.length !== selectedEquipmentIds.length ||
+        selectedEquipment.some((item) => item.customerId !== customerId)
+      )
+        throw new Error(
+          "One or more selected equipment items do not belong to this customer.",
+        );
+      equipmentIds = selectedEquipmentIds;
     } else if (equipmentMode !== "unknown") {
       throw new Error("Invalid equipment option.");
     }
 
-    if (technicianId) {
-      const technician = await tx.technician.findUnique({ where: { id: technicianId }, select: { isActive: true, status: true } });
-      if (!technician?.isActive || technician.status === TechnicianStatus.INACTIVE || technician.status === TechnicianStatus.ON_LEAVE) throw new Error("Selected technician is not available.");
+    if (technicianIds.length) {
+      const selectedTechnicians = await tx.technician.findMany({
+        where: { id: { in: technicianIds } },
+        select: { id: true, isActive: true, status: true },
+      });
+      if (
+        selectedTechnicians.length !== technicianIds.length ||
+        selectedTechnicians.some(
+          (technician) =>
+            !technician.isActive ||
+            technician.status === TechnicianStatus.INACTIVE ||
+            technician.status === TechnicianStatus.ON_LEAVE,
+        )
+      )
+        throw new Error("One or more selected technicians are not available.");
     }
-    const { repeatIssueDetected, repeatReferenceServiceId } =
-      await detectRepeatIssue(tx, equipmentId, customerComplaint);
 
-    const complaintNumber = await nextDocumentNumber(
+    const complaintNumbers = await nextDocumentNumbers(
       tx,
       "complaint",
       "VFE-SRV-",
+      equipmentIds.length,
     );
-    const row = await tx.serviceComplaint.create({
-      data: {
-        complaintNumber,
-        complaintDate:
-          optionalDate(formData.get("complaintDate")) ?? new Date(),
-        customerId,
-        equipmentId,
-        customerComplaint,
-        complaintCategory: optionalString(formData.get("complaintCategory")),
-        priority: priority as ComplaintPriority,
-        preferredVisitDate: optionalDate(formData.get("preferredVisitDate")),
-        notes: optionalString(formData.get("notes")),
-        source: source as ComplaintSource,
-        status: technicianId ? ServiceStatus.TECHNICIAN_ASSIGNED : ServiceStatus.UNASSIGNED,
-        currentTechnicianId: technicianId,
-        createdById: user.id,
-        repeatIssueDetected,
-        repeatReferenceServiceId,
-      },
-    });
-    await tx.serviceStatusHistory.create({
-      data: {
-        complaintId: row.id,
-        previousStatus: ServiceStatus.COMPLAINT_RECEIVED,
-        newStatus: row.status,
-        changedById: user.id,
-        notes: "Complaint registered.",
-      },
-    });
-    if (technicianId) {
-      await tx.serviceAssignment.create({ data: { complaintId: row.id, technicianId, assignedById: user.id, reason: "Assigned during complaint registration." } });
-      await tx.technician.update({ where: { id: technicianId }, data: { status: TechnicianStatus.BUSY } });
+    const createdRows = [];
+    for (let index = 0; index < equipmentIds.length; index += 1) {
+      const equipmentId = equipmentIds[index];
+      const { repeatIssueDetected, repeatReferenceServiceId } =
+        await detectRepeatIssue(tx, equipmentId, customerComplaint);
+      const row = await tx.serviceComplaint.create({
+        data: {
+          complaintNumber: complaintNumbers[index],
+          complaintDate:
+            optionalDate(formData.get("complaintDate")) ?? new Date(),
+          customerId,
+          equipmentId,
+          customerComplaint,
+          complaintCategory: optionalString(formData.get("complaintCategory")),
+          priority: priority as ComplaintPriority,
+          preferredVisitDate: optionalDate(formData.get("preferredVisitDate")),
+          notes: optionalString(formData.get("notes")),
+          source: source as ComplaintSource,
+          status: technicianIds.length
+            ? ServiceStatus.TECHNICIAN_ASSIGNED
+            : ServiceStatus.UNASSIGNED,
+          currentTechnicianId: technicianIds[0] ?? null,
+          createdById: user.id,
+          repeatIssueDetected,
+          repeatReferenceServiceId,
+        },
+      });
+      await tx.serviceStatusHistory.create({
+        data: {
+          complaintId: row.id,
+          previousStatus: ServiceStatus.COMPLAINT_RECEIVED,
+          newStatus: row.status,
+          changedById: user.id,
+          notes: "Complaint registered.",
+        },
+      });
+      if (technicianIds.length) {
+        await tx.serviceAssignment.createMany({
+          data: technicianIds.map((technicianId) => ({
+            complaintId: row.id,
+            technicianId,
+            assignedById: user.id,
+            reason: "Assigned during complaint registration.",
+          })),
+        });
+      }
+      createdRows.push(row);
     }
-    return row;
+    if (technicianIds.length) {
+      await tx.technician.updateMany({
+        where: { id: { in: technicianIds } },
+        data: { status: TechnicianStatus.BUSY },
+      });
+    }
+    return createdRows;
   });
   revalidateOperationalLookups();
   revalidatePath("/customers");
@@ -259,7 +331,8 @@ export async function createComplaint(formData: FormData) {
   revalidatePath("/complaints");
   revalidatePath("/teams");
   revalidatePath("/dashboard");
-  redirect(`/complaints/${complaint.id}`);
+  if (complaints.length === 1) redirect(`/complaints/${complaints[0].id}`);
+  redirect(`/complaints?created=${complaints.length}`);
 }
 
 export async function linkComplaintEquipmentFromForm(formData: FormData) {
@@ -380,6 +453,12 @@ export async function assignTechnician(
   await db.$transaction(async (tx) => {
     const complaint = await tx.serviceComplaint.findUnique({
       where: { id: complaintId },
+      include: {
+        assignments: {
+          where: { isActive: true },
+          select: { technicianId: true },
+        },
+      },
     });
     if (!complaint) throw new Error("Complaint not found.");
     if (terminalStatuses.includes(complaint.status))
@@ -396,20 +475,8 @@ export async function assignTechnician(
       throw new Error("Selected technician is not available for assignment.");
 
     const previousTechId = complaint.currentTechnicianId;
-    if (previousTechId === technicianId)
+    if (complaint.assignments.some((assignment) => assignment.technicianId === technicianId))
       throw new Error("This technician is already assigned to the complaint.");
-    if (previousTechId && !reason?.trim())
-      throw new Error("A reassignment reason is required.");
-    if (previousTechId) {
-      await tx.serviceAssignment.updateMany({
-        where: { complaintId, isActive: true },
-        data: {
-          isActive: false,
-          unassignedAt: new Date(),
-          endedReason: reason || "Reassigned",
-        },
-      });
-    }
     await tx.serviceAssignment.create({
       data: {
         complaintId,
@@ -417,46 +484,37 @@ export async function assignTechnician(
         assignedById: user.id,
         reason:
           reason ||
-          (previousTechId ? "Reassigned by office" : "Initial assignment"),
+          (previousTechId ? "Added to service team" : "Initial assignment"),
       },
     });
     await tx.serviceComplaint.update({
       where: { id: complaintId },
       data: {
-        currentTechnicianId: technicianId,
-        status: ServiceStatus.TECHNICIAN_ASSIGNED,
+        currentTechnicianId: previousTechId ?? technicianId,
+        status:
+          complaint.status === ServiceStatus.UNASSIGNED ||
+          complaint.status === ServiceStatus.COMPLAINT_RECEIVED
+            ? ServiceStatus.TECHNICIAN_ASSIGNED
+            : complaint.status,
       },
     });
     await tx.technician.update({
       where: { id: technicianId },
       data: { status: TechnicianStatus.BUSY },
     });
-    if (previousTechId) {
-      const previousOpenJobs = await tx.serviceComplaint.count({
-        where: {
-          currentTechnicianId: previousTechId,
-          id: { not: complaintId },
-          status: { notIn: terminalStatuses },
-        },
-      });
-      await tx.technician.update({
-        where: { id: previousTechId },
-        data: {
-          status: previousOpenJobs
-            ? TechnicianStatus.BUSY
-            : TechnicianStatus.AVAILABLE,
-        },
-      });
-    }
     await tx.serviceStatusHistory.create({
       data: {
         complaintId,
         previousStatus: complaint.status,
-        newStatus: ServiceStatus.TECHNICIAN_ASSIGNED,
+        newStatus:
+          complaint.status === ServiceStatus.UNASSIGNED ||
+          complaint.status === ServiceStatus.COMPLAINT_RECEIVED
+            ? ServiceStatus.TECHNICIAN_ASSIGNED
+            : complaint.status,
         changedById: user.id,
         notes: previousTechId
-          ? `Reassigned technician. ${reason ?? ""}`
-          : "Technician assigned.",
+          ? `Additional technician assigned: ${tech.name}.${reason ? ` ${reason}` : ""}`
+          : `Technician assigned: ${tech.name}.${reason ? ` ${reason}` : ""}`,
       },
     });
   });
@@ -473,6 +531,85 @@ export async function assignTechnicianFromForm(formData: FormData) {
   const technicianId = requiredText(formData.get("technicianId"), "Technician");
   const reason = optionalString(formData.get("reason")) ?? undefined;
   return assignTechnician(complaintId, technicianId, reason);
+}
+
+export async function unassignTechnicianFromForm(formData: FormData) {
+  const user = await requireUser();
+  if (!canAssign(user))
+    throw new Error("You do not have technician assignment permission.");
+  const complaintId = requiredText(formData.get("complaintId"), "Complaint");
+  const technicianId = requiredText(formData.get("technicianId"), "Technician");
+  const reason = optionalString(formData.get("reason")) ?? "Removed from service team";
+
+  await db.$transaction(async (tx) => {
+    const complaint = await tx.serviceComplaint.findUnique({
+      where: { id: complaintId },
+      include: {
+        assignments: {
+          where: { isActive: true },
+          include: { technician: { select: { name: true } } },
+          orderBy: { assignedAt: "asc" },
+        },
+      },
+    });
+    if (!complaint) throw new Error("Complaint not found.");
+    if (terminalStatuses.includes(complaint.status))
+      throw new Error("Completed or closed complaints cannot be changed.");
+    const assignment = complaint.assignments.find(
+      (item) => item.technicianId === technicianId,
+    );
+    if (!assignment) throw new Error("This technician is not currently assigned.");
+
+    await tx.serviceAssignment.update({
+      where: { id: assignment.id },
+      data: {
+        isActive: false,
+        unassignedAt: new Date(),
+        endedReason: reason,
+      },
+    });
+    const remaining = complaint.assignments.filter(
+      (item) => item.technicianId !== technicianId,
+    );
+    const nextPrimaryId =
+      complaint.currentTechnicianId === technicianId
+        ? remaining[0]?.technicianId ?? null
+        : complaint.currentTechnicianId;
+    const nextStatus = remaining.length ? complaint.status : ServiceStatus.UNASSIGNED;
+    await tx.serviceComplaint.update({
+      where: { id: complaintId },
+      data: { currentTechnicianId: nextPrimaryId, status: nextStatus },
+    });
+    await tx.serviceStatusHistory.create({
+      data: {
+        complaintId,
+        previousStatus: complaint.status,
+        newStatus: nextStatus,
+        changedById: user.id,
+        notes: `${assignment.technician.name} removed from service team. ${reason}`,
+      },
+    });
+    const otherActiveJobs = await tx.serviceAssignment.count({
+      where: {
+        technicianId,
+        isActive: true,
+        complaint: { status: { notIn: terminalStatuses } },
+      },
+    });
+    await tx.technician.update({
+      where: { id: technicianId },
+      data: {
+        status: otherActiveJobs ? TechnicianStatus.BUSY : TechnicianStatus.AVAILABLE,
+      },
+    });
+  });
+
+  revalidateOperationalLookups();
+  revalidatePath(`/complaints/${complaintId}`);
+  revalidatePath("/complaints");
+  revalidatePath("/jobs");
+  revalidatePath("/teams");
+  revalidatePath("/dashboard");
 }
 
 export async function updateServiceStatus(
@@ -496,7 +633,7 @@ export async function updateServiceStatus(
     newStatus !== ServiceStatus.UNASSIGNED &&
     newStatus !== ServiceStatus.CANCELLED &&
     newStatus !== ServiceStatus.CLOSED &&
-    !complaint.currentTechnicianId
+    !complaint.assignments.length
   )
     throw new Error(
       "Assign a technician before moving this complaint to that status.",
@@ -544,7 +681,7 @@ export async function updateServiceStatus(
       (newStatus === ServiceStatus.UNASSIGNED ||
         newStatus === ServiceStatus.CLOSED ||
         newStatus === ServiceStatus.CANCELLED) &&
-      complaint.currentTechnicianId
+      complaint.assignments.length
     ) {
       await tx.serviceAssignment.updateMany({
         where: { complaintId, isActive: true },
@@ -554,19 +691,21 @@ export async function updateServiceStatus(
           endedReason: notes ?? titleCaseStatus(newStatus),
         },
       });
-      const openJobs = await tx.serviceComplaint.count({
-        where: {
-          currentTechnicianId: complaint.currentTechnicianId,
-          id: { not: complaintId },
-          status: { notIn: terminalStatuses },
-        },
-      });
-      await tx.technician.update({
-        where: { id: complaint.currentTechnicianId },
-        data: {
-          status: openJobs ? TechnicianStatus.BUSY : TechnicianStatus.AVAILABLE,
-        },
-      });
+      for (const { technicianId } of complaint.assignments) {
+        const openJobs = await tx.serviceAssignment.count({
+          where: {
+            technicianId,
+            isActive: true,
+            complaint: { status: { notIn: terminalStatuses } },
+          },
+        });
+        await tx.technician.update({
+          where: { id: technicianId },
+          data: {
+            status: openJobs ? TechnicianStatus.BUSY : TechnicianStatus.AVAILABLE,
+          },
+        });
+      }
     }
   });
   revalidateOperationalLookups();
@@ -580,7 +719,7 @@ export async function saveInspection(complaintId: string, formData: FormData) {
   const { user, complaint } = await requireComplaintAccess(complaintId);
   if (complaint.serviceRecord)
     throw new Error("Completed service records are immutable.");
-  if (!complaint.currentTechnicianId)
+  if (!complaint.assignments.length)
     throw new Error("Assign a technician before recording an inspection.");
   const findings = String(formData.get("findings") ?? "").trim();
   const actualProblem = String(formData.get("actualProblem") ?? "").trim();
@@ -626,7 +765,7 @@ export async function addWorkLog(complaintId: string, formData: FormData) {
   const { user, complaint } = await requireComplaintAccess(complaintId);
   if (complaint.serviceRecord)
     throw new Error("Completed service records are immutable.");
-  if (!complaint.currentTechnicianId)
+  if (!complaint.assignments.length)
     throw new Error("Assign a technician before recording service work.");
   const workDone = String(formData.get("workDone") ?? "").trim();
   if (!workDone) throw new Error("Work done is required.");
@@ -715,23 +854,18 @@ export async function markNoPartsUsed(complaintId: string) {
 
 export async function completeService(complaintId: string, formData: FormData) {
   const { user } = await requireComplaintAccess(complaintId);
-  const completionNotes = requiredText(
-    formData.get("completionNotes"),
-    "Completion notes",
+  const actualProblem = requiredText(
+    formData.get("actualProblem"),
+    "Actual problem found",
+  );
+  const workPerformed = requiredText(
+    formData.get("workDone"),
+    "Work performed",
   );
   const charges = nonNegativeNumber(
     requiredText(formData.get("charges"), "Service amount"),
     "Service amount",
   );
-  const collectedNow = nonNegativeNumber(
-    formData.get("collectedNow"),
-    "Collected now",
-  );
-  const paymentMode = String(formData.get("paymentMode") || PaymentMode.CASH);
-  if (!Object.values(PaymentMode).includes(paymentMode as PaymentMode))
-    throw new Error("Invalid payment mode.");
-  if (collectedNow > charges + 0.001)
-    throw new Error("Collected amount cannot be more than service amount.");
   const result = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "ServiceComplaint" WHERE id = ${complaintId} FOR UPDATE`;
     const complaint = await tx.serviceComplaint.findUnique({
@@ -741,9 +875,13 @@ export async function completeService(complaintId: string, formData: FormData) {
         equipment: true,
         currentTechnician: true,
         inspection: true,
-        workLogs: { orderBy: { createdAt: "asc" } },
         parts: true,
         serviceRecord: true,
+        assignments: {
+          where: { isActive: true },
+          include: { technician: true },
+          orderBy: { assignedAt: "asc" },
+        },
       },
     });
     if (!complaint) throw new Error("Complaint not found.");
@@ -751,21 +889,46 @@ export async function completeService(complaintId: string, formData: FormData) {
       throw new Error("This service is already completed.");
     if (terminalStatuses.includes(complaint.status))
       throw new Error("This complaint is closed or cancelled and cannot be completed.");
-    if (user.role === UserRole.TECHNICIAN && complaint.currentTechnicianId !== user.technicianId)
+    if (
+      user.role === UserRole.TECHNICIAN &&
+      !complaint.assignments.some(
+        (assignment) => assignment.technicianId === user.technicianId,
+      )
+    )
       throw new Error("You are no longer assigned to this job.");
     if (user.role === UserRole.TECHNICIAN && complaint.status === ServiceStatus.WAITING_FOR_CUSTOMER_APPROVAL)
       throw new Error("Ask the office to confirm customer approval before completing this service.");
     if (!complaint.currentTechnician)
       throw new Error("A technician must be assigned before completion.");
-    if (!complaint.inspection?.actualProblem)
-      throw new Error("Problem Found is required before completion.");
-    if (!complaint.workLogs.length)
-      throw new Error("Work Done is required before completion.");
+    if (!complaint.assignments.length)
+      throw new Error("At least one active technician must be assigned before completion.");
+
+    await tx.serviceInspection.upsert({
+      where: { complaintId },
+      create: {
+        complaintId,
+        findings: actualProblem,
+        actualProblem,
+      },
+      update: {
+        findings: actualProblem,
+        actualProblem,
+      },
+    });
+    await tx.serviceWorkLog.deleteMany({ where: { complaintId } });
+    await tx.serviceWorkLog.create({
+      data: {
+        complaintId,
+        workDone: workPerformed,
+        createdById: user.id,
+      },
+    });
     const serviceDate = new Date();
     const serviceNumber = await nextDocumentNumber(tx, "service", "VFE-SVC-");
-    const workDone = complaint.workLogs
-      .map((w) => `• ${w.workDone}`)
-      .join("\n");
+    const workDone = `• ${workPerformed}`;
+    const technicianNames = Array.from(
+      new Set(complaint.assignments.map((assignment) => assignment.technician.name)),
+    );
     const partsSummary = complaint.parts.length
       ? complaint.parts
           .map(
@@ -787,10 +950,10 @@ export async function completeService(complaintId: string, formData: FormData) {
         technicianId: complaint.currentTechnicianId,
         serviceDate,
         complaintReported: complaint.customerComplaint,
-        problemFound: complaint.inspection.actualProblem,
+        problemFound: actualProblem,
         workDone,
         partsSummary,
-        technicianNameSnapshot: complaint.currentTechnician.name,
+        technicianNameSnapshot: technicianNames.join(" & "),
         customerNameSnapshot: complaint.customer.name,
         customerPhoneSnapshot: complaint.customer.primaryMobile,
         customerAddressSnapshot: [
@@ -808,7 +971,7 @@ export async function completeService(complaintId: string, formData: FormData) {
         warrantyExpirySnapshot: complaint.equipment?.warrantyExpiryDate ?? null,
         warrantyStatus: wStatus,
         notes: null,
-        completionNotes,
+        completionNotes: null,
         charges,
       },
     });
@@ -816,28 +979,6 @@ export async function completeService(complaintId: string, formData: FormData) {
       where: { complaintId },
       data: { serviceRecordId: record.id },
     });
-    if (collectedNow > 0) {
-      const collectionNumber = await nextDocumentNumber(
-        tx,
-        "service_collection",
-        "VFE-COL-",
-      );
-      await tx.serviceCollection.create({
-        data: {
-          collectionNumber,
-          serviceRecordId: record.id,
-          complaintId: complaint.id,
-          customerId: complaint.customerId,
-          equipmentId: complaint.equipmentId,
-          technicianId: complaint.currentTechnicianId,
-          collectedById: user.id,
-          amount: collectedNow,
-          paymentMode: paymentMode as PaymentMode,
-          collectedAt: serviceDate,
-          notes: "Collected during service completion.",
-        },
-      });
-    }
     await tx.serviceComplaint.update({
       where: { id: complaintId },
       data: { status: ServiceStatus.SERVICE_COMPLETED, closedAt: serviceDate },
@@ -848,8 +989,7 @@ export async function completeService(complaintId: string, formData: FormData) {
         previousStatus: complaint.status,
         newStatus: ServiceStatus.SERVICE_COMPLETED,
         changedById: user.id,
-        notes:
-          completionNotes ?? "Service completed and permanent history created.",
+        notes: "Service completed. Actual problem and work performed recorded.",
       },
     });
     await tx.serviceAssignment.updateMany({
@@ -860,25 +1000,23 @@ export async function completeService(complaintId: string, formData: FormData) {
         endedReason: "Service completed",
       },
     });
-    const otherJobs = await tx.serviceComplaint.count({
-      where: {
-        currentTechnicianId: complaint.currentTechnicianId,
-        id: { not: complaintId },
-        status: {
-          notIn: [
-            ServiceStatus.SERVICE_COMPLETED,
-            ServiceStatus.CLOSED,
-            ServiceStatus.CANCELLED,
-          ],
+    for (const technicianId of new Set(
+      complaint.assignments.map((assignment) => assignment.technicianId),
+    )) {
+      const otherJobs = await tx.serviceAssignment.count({
+        where: {
+          technicianId,
+          isActive: true,
+          complaint: { status: { notIn: terminalStatuses } },
         },
-      },
-    });
-    await tx.technician.update({
-      where: { id: complaint.currentTechnician.id },
-      data: {
-        status: otherJobs ? TechnicianStatus.BUSY : TechnicianStatus.AVAILABLE,
-      },
-    });
+      });
+      await tx.technician.update({
+        where: { id: technicianId },
+        data: {
+          status: otherJobs ? TechnicianStatus.BUSY : TechnicianStatus.AVAILABLE,
+        },
+      });
+    }
     return record;
   });
   revalidateOperationalLookups();
