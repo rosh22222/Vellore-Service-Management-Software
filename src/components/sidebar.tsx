@@ -54,19 +54,19 @@ export function Sidebar({
         });
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden h-dvh w-64 flex-col border-r border-brand-border bg-brand-sidebar text-brand-ink lg:flex">
-      <div className="px-6 pb-6 pt-7">
+      <div className="p-3">
         <Link
           href={role === "TECHNICIAN" ? "/jobs" : "/dashboard"}
           aria-label={role === "TECHNICIAN" ? "Go to my jobs" : "Go to dashboard"}
-          className="flex h-16 items-center rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-primary"
+          className="flex h-20 items-center rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-primary"
         >
           <Image
             src={logoSrc}
             alt={`${companyName} logo`}
-            width={230}
-            height={77}
+            width={232}
+            height={87}
             priority
-            sizes="208px"
+            sizes="232px"
             className="h-full w-full object-contain"
           />
         </Link>

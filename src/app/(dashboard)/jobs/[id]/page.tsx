@@ -1,4 +1,5 @@
 import { ActionForm } from "@/components/action-form";
+import { ComplaintEquipmentWorkspace } from "@/components/complaint-equipment-workspace";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
@@ -11,14 +12,25 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/form";
 import { date } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
+import { getCachedActiveBrands } from "@/lib/cached-lookups";
 
 export default async function JobDetail({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{
+    equipmentAdded?: string;
+    equipmentUpdated?: string;
+  }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
+  const query = await searchParams;
+  const addedCount = Math.max(
+    0,
+    Math.min(25, Number.parseInt(query.equipmentAdded ?? "0", 10) || 0),
+  );
   if (user.role !== "TECHNICIAN") redirect(`/complaints/${id}`);
   const c = await db.serviceComplaint.findUnique({
     where: { id },
@@ -56,14 +68,42 @@ export default async function JobDetail({
     redirect(`/service-history/${c.serviceRecord.id}`);
   }
   if (!hasActiveAssignment) notFound();
-  const history = c.equipmentId
-    ? await db.serviceRecord.findMany({
-        where: { equipmentId: c.equipmentId },
-        include: { technician: true },
-        orderBy: { serviceDate: "desc" },
-        take: 10,
-      })
-    : [];
+  const [history, customerEquipment, brands, visitServices] = await Promise.all([
+    c.equipmentId
+      ? db.serviceRecord.findMany({
+          where: { equipmentId: c.equipmentId },
+          include: { technician: true },
+          orderBy: { serviceDate: "desc" },
+          take: 10,
+        })
+      : Promise.resolve([]),
+    db.customerEquipment.findMany({
+      where: { customerId: c.customerId },
+      orderBy: [{ name: "asc" }, { modelNumber: "asc" }],
+    }),
+    getCachedActiveBrands(),
+    db.serviceComplaint.findMany({
+      where: c.serviceVisitGroupId
+        ? { serviceVisitGroupId: c.serviceVisitGroupId }
+        : { id: c.id },
+      select: {
+        id: true,
+        complaintNumber: true,
+        customerComplaint: true,
+        status: true,
+        equipment: {
+          select: {
+            name: true,
+            brand: true,
+            modelNumber: true,
+            serialNumber: true,
+            notes: true,
+          },
+        },
+      },
+      orderBy: [{ complaintDate: "asc" }, { createdAt: "asc" }],
+    }),
+  ]);
   const complete = Boolean(c.serviceRecord) || c.status === "CLOSED" || c.status === "CANCELLED";
   const w = warrantyStatus(c.equipment?.warrantyExpiryDate);
   return (
@@ -131,6 +171,18 @@ export default async function JobDetail({
           </CardBody>
         </Card>
       </div>
+      {!complete && (
+        <ComplaintEquipmentWorkspace
+          complaintId={c.id}
+          equipment={customerEquipment}
+          brands={brands}
+          currentEquipmentId={c.equipmentId}
+          visitServices={visitServices}
+          detailBasePath="/jobs"
+          addedCount={addedCount}
+          equipmentUpdated={query.equipmentUpdated === "1"}
+        />
+      )}
       <Card className="mt-6">
         <CardHeader
           title="Customer Complaint"
@@ -188,7 +240,7 @@ export default async function JobDetail({
           </table>
         </div>
       </Card>
-      {!complete && (
+      {!complete && c.equipmentId && (
         <div className="mt-6">
           <Card>
             <CardHeader

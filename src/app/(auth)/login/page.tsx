@@ -13,8 +13,8 @@ export default async function LoginPage() {
       <div aria-hidden="true" className="login-backdrop-panel login-backdrop-panel-warm" />
 
       <section aria-labelledby="login-heading" className="login-card relative z-10 w-full max-w-[500px] rounded-[32px] border border-white bg-white/90 px-6 py-7 backdrop-blur-xl sm:rounded-[36px] sm:p-8">
-        <header className="mb-8 text-center">
-          <div className="login-logo-panel">
+        <header className="mb-6 text-center">
+          <div className="flex items-center justify-center">
             <Image
               src={getBrandAssetSrc("vellore-logo-transparent.png")}
               alt="Vellore Fitness Equipments"
@@ -25,7 +25,7 @@ export default async function LoginPage() {
               className="login-logo-art"
             />
           </div>
-          <h1 id="login-heading" className="mt-6 text-[2rem] font-bold leading-tight tracking-[-0.04em] text-brand-primary sm:text-[2.5rem]">
+          <h1 id="login-heading" className="mt-4 text-[2rem] font-bold leading-tight tracking-[-0.04em] text-brand-primary sm:text-[2.5rem]">
             Welcome Back
           </h1>
         </header>

@@ -6,7 +6,7 @@ import { requireRoles } from "@/lib/auth";
 import { updateCustomer } from "@/actions/customer";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { Field, Input, Select } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { titleCase } from "@/lib/format";
 import { PhoneInput } from "@/components/ui/phone-input";
@@ -72,11 +72,6 @@ export default async function EditCustomer({
             <Field label="GST">
               <Input name="gstNumber" defaultValue={c.gstNumber ?? ""} />
             </Field>
-            <div className="md:col-span-2 xl:col-span-3">
-              <Field label="Notes">
-                <Textarea name="notes" defaultValue={c.notes ?? ""} />
-              </Field>
-            </div>
             <div className="md:col-span-2 xl:col-span-3">
               <Button>Save Changes</Button>
             </div>

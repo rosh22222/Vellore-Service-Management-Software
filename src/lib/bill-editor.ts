@@ -6,7 +6,7 @@ import { MAX_BILL_MACHINES, trackedProductCount, validateMachineSerials } from "
 
 export type BillEditorInput = {
   billNumber: string; billDate: Date; expectedBillVersion: string; expectedCustomerVersion: string;
-  customer: Pick<Prisma.CustomerUncheckedUpdateInput, "name" | "type" | "primaryMobile" | "alternateMobile" | "email" | "address" | "city" | "state" | "pinCode" | "gstNumber" | "notes">;
+  customer: Pick<Prisma.CustomerUncheckedUpdateInput, "name" | "type" | "primaryMobile" | "alternateMobile" | "email" | "address" | "city" | "state" | "pinCode" | "gstNumber">;
   products: { itemId: string | null; expectedUnits: string | null; data: BillItemInput }[];
 };
 

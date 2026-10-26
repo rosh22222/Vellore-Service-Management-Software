@@ -4,7 +4,7 @@ import { createCustomer } from "@/actions/customer";
 import { requireRoles } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { Field, Input, Select } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { titleCase } from "@/lib/format";
 import { PhoneInput } from "@/components/ui/phone-input";
@@ -62,9 +62,6 @@ export default async function NewCustomerPage() {
             </Field>
             <Field label="GST Number">
               <Input name="gstNumber" />
-            </Field>
-            <Field label="Notes">
-              <Textarea name="notes" />
             </Field>
             <div className="md:col-span-2 xl:col-span-3">
               <Button type="submit">Create Customer</Button>

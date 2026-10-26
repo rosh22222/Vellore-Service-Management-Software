@@ -122,7 +122,6 @@ model Customer {
   state           String
   pinCode         String?
   gstNumber       String?
-  notes           String?
   equipment       CustomerEquipment[]
   billDetails     BillDetail[]
   complaints      ServiceComplaint[]
@@ -214,6 +213,7 @@ model ServiceComplaint {
   currentTechnician        Technician?            @relation("CurrentTechnician", fields: [currentTechnicianId], references: [id], onDelete: SetNull)
   createdById              String
   createdBy                User                   @relation("ComplaintCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  serviceVisitGroupId      String?
   repeatIssueDetected      Boolean                @default(false)
   repeatReferenceServiceId String?
   noPartsUsed              Boolean                @default(false)
@@ -233,6 +233,7 @@ model ServiceComplaint {
   @@index([status])
   @@index([priority])
   @@index([currentTechnicianId])
+  @@index([serviceVisitGroupId])
   @@index([complaintDate])
 }
 

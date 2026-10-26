@@ -1,6 +1,5 @@
 import { ActionForm } from "@/components/action-form";
-import { EquipmentSelect } from "@/components/equipment-select";
-import { equipmentLabel } from "@/lib/equipment-label";
+import { ComplaintEquipmentWorkspace } from "@/components/complaint-equipment-workspace";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
@@ -8,7 +7,6 @@ import { requireRoles } from "@/lib/auth";
 import {
   assignTechnicianFromForm,
   unassignTechnicianFromForm,
-  linkComplaintEquipmentFromForm,
   completeServiceFromForm,
 } from "@/actions/complaint";
 import { PageHeader } from "@/components/ui/page";
@@ -18,16 +16,30 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { date, titleCase } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
-import { getCachedTechnicianOptions } from "@/lib/cached-lookups";
+import {
+  getCachedActiveBrands,
+  getCachedTechnicianOptions,
+} from "@/lib/cached-lookups";
 
 export default async function ComplaintDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{
+    equipmentAdded?: string;
+    equipmentUpdated?: string;
+    equipmentDeleted?: string;
+  }>;
 }) {
   const user = await requireRoles(["ADMIN", "OFFICE_STAFF"]);
   const { id } = await params;
-  const [c, technicians] = await Promise.all([
+  const query = await searchParams;
+  const addedCount = Math.max(
+    0,
+    Math.min(25, Number.parseInt(query.equipmentAdded ?? "0", 10) || 0),
+  );
+  const [c, technicians, brands] = await Promise.all([
     db.serviceComplaint.findUnique({
       where: { id },
       include: {
@@ -52,15 +64,39 @@ export default async function ComplaintDetailPage({
       },
     }),
     getCachedTechnicianOptions(),
+    getCachedActiveBrands(),
   ]);
   if (!c) notFound();
   const complete = Boolean(c.serviceRecord) || c.status === "CLOSED" || c.status === "CANCELLED";
-  const customerEquipment = complete
-    ? []
-    : await db.customerEquipment.findMany({
+  const [customerEquipment, visitServices] = await Promise.all([
+    complete
+      ? Promise.resolve([])
+      : db.customerEquipment.findMany({
         where: { customerId: c.customerId },
         orderBy: [{ name: "asc" }, { modelNumber: "asc" }],
-      });
+      }),
+    db.serviceComplaint.findMany({
+      where: c.serviceVisitGroupId
+        ? { serviceVisitGroupId: c.serviceVisitGroupId }
+        : { id: c.id },
+      select: {
+        id: true,
+        complaintNumber: true,
+        customerComplaint: true,
+        status: true,
+        equipment: {
+          select: {
+            name: true,
+            brand: true,
+            modelNumber: true,
+            serialNumber: true,
+            notes: true,
+          },
+        },
+      },
+      orderBy: [{ complaintDate: "asc" }, { createdAt: "asc" }],
+    }),
+  ]);
   const w = warrantyStatus(
     c.equipment?.warrantyExpiryDate,
     c.serviceRecord?.serviceDate ?? new Date(),
@@ -81,6 +117,20 @@ export default async function ComplaintDetailPage({
   const activeAssignments = c.assignments.filter(
     (assignment) => assignment.isActive,
   );
+  const completedTechnicians = c.serviceRecord
+    ? c.serviceRecord.technicianNameSnapshot?.trim() ||
+      Array.from(
+        new Set(
+          c.assignments
+            .filter(
+              (assignment) => assignment.endedReason === "Service completed",
+            )
+            .map((assignment) => assignment.technician.name),
+        ),
+      ).join(" & ") ||
+      c.currentTechnician?.name ||
+      "Not recorded"
+    : null;
   return (
     <>
       <PageHeader
@@ -149,12 +199,14 @@ export default async function ComplaintDetailPage({
               {c.equipment && <p className="mb-1 text-xs font-semibold text-brand-primary">{c.equipment.equipmentCode}</p>}
               <div className="value">
                 {c.equipment ? (
-                  <Link className="link" href={`/equipment/${c.equipment.id}`}>
+                  <div>
+                    <Link className="link" href={`/equipment/${c.equipment.id}`}>
                     {c.equipment.name}{" "}
                     {c.equipment.modelNumber
                       ? `• ${c.equipment.modelNumber}`
                       : ""}
-                  </Link>
+                    </Link>
+                  </div>
                 ) : (
                   "Not linked"
                 )}
@@ -201,104 +253,51 @@ export default async function ComplaintDetailPage({
         </Card>
       </div>
 
-      {!complete && (
-        <Card className="mt-6">
+      {c.serviceRecord && (
+        <Card className="mt-6 border-brand-accent/70">
           <CardHeader
-            title="Link Equipment"
-            subtitle="Use this when complaint was registered before the exact machine details were known."
+            title="Service Completion"
+            subtitle="Final service details and the technicians credited for this work."
           />
-          <CardBody className="space-y-6">
-            <ActionForm
-              action={linkComplaintEquipmentFromForm}
-              className="grid gap-4 md:grid-cols-[1fr_auto]"
-            >
-              <input type="hidden" name="complaintId" value={c.id} />
-              <input type="hidden" name="equipmentMode" value="existing" />
-              <Field label="Existing Customer Equipment" required>
-                <EquipmentSelect
-                  name="equipmentId"
-                  required
-                  defaultValue={c.equipmentId ?? ""}
-                  disabled={customerEquipment.length === 0}
-                  options={customerEquipment.map(item => ({ value: item.id, label: equipmentLabel(item) }))}
-                />
-              </Field>
-              <div className="self-end">
-                <Button
-                  type="submit"
-                  disabled={customerEquipment.length === 0}
+          <CardBody className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-xl border border-brand-accent/45 bg-brand-faint p-4 sm:col-span-2 xl:col-span-1">
+              <div className="label">Technician(s) Who Worked on This Service</div>
+              <div className="mt-2 text-lg font-bold text-brand-primary">
+                {completedTechnicians}
+              </div>
+            </div>
+            <div className="rounded-xl bg-brand-subtle p-4">
+              <div className="label">Service Completed On</div>
+              <div className="value">{date(c.serviceRecord.serviceDate, true)}</div>
+            </div>
+            <div className="rounded-xl bg-brand-subtle p-4">
+              <div className="label">Permanent Service Record</div>
+              <div className="value">
+                <Link
+                  className="link font-semibold"
+                  href={`/service-history/${c.serviceRecord.id}`}
                 >
-                  Link Equipment
-                </Button>
+                  {c.serviceRecord.serviceNumber}
+                </Link>
               </div>
-            </ActionForm>
-
-            {c.equipmentId && (
-              <ActionForm action={linkComplaintEquipmentFromForm}>
-                <input type="hidden" name="complaintId" value={c.id} />
-                <input type="hidden" name="equipmentMode" value="unknown" />
-                <Button
-                  variant="secondary"
-                  loadingText="Updating..."
-                >
-                  Mark Equipment Not Known
-                </Button>
-              </ActionForm>
-            )}
-
-            <ActionForm
-              action={linkComplaintEquipmentFromForm}
-              className="grid gap-4 border-t border-brand-border pt-5 md:grid-cols-2 xl:grid-cols-4"
-            >
-              <input type="hidden" name="complaintId" value={c.id} />
-              <input type="hidden" name="equipmentMode" value="new" />
-              <div className="md:col-span-2 xl:col-span-4">
-                <h3 className="text-sm font-semibold text-brand-ink">
-                  Register New Equipment for This Complaint
-                </h3>
-              </div>
-              <Field label="Equipment Name" required>
-                <Input name="newEquipmentName" required />
-              </Field>
-              <Field label="Brand">
-                <Input name="newEquipmentBrand" />
-              </Field>
-              <Field label="Model Number">
-                <Input name="newEquipmentModel" />
-              </Field>
-              <Field label="Serial Number">
-                <Input name="newEquipmentSerial" />
-              </Field>
-              <Field label="Purchase Date">
-                <Input name="newEquipmentPurchaseDate" type="date" />
-              </Field>
-              <Field label="Installation Date">
-                <Input name="newEquipmentInstallationDate" type="date" />
-              </Field>
-              <Field label="Warranty Start">
-                <Input name="newEquipmentWarrantyStartDate" type="date" />
-              </Field>
-              <Field label="Warranty Expiry">
-                <Input name="newEquipmentWarrantyExpiryDate" type="date" />
-              </Field>
-              <Field label="Warranty Duration">
-                <Input name="newEquipmentWarrantyDuration" />
-              </Field>
-              <Field label="Equipment Stored Bill Reference">
-                <Input name="newEquipmentInvoice" />
-              </Field>
-              <div className="md:col-span-2 xl:col-span-4">
-                <Field label="Equipment Notes">
-                  <Textarea name="newEquipmentNotes" rows={2} />
-                </Field>
-              </div>
-              <div className="md:col-span-2 xl:col-span-4">
-                <Button type="submit">Register & Link Equipment</Button>
-              </div>
-            </ActionForm>
+            </div>
           </CardBody>
         </Card>
       )}
+
+      <ComplaintEquipmentWorkspace
+        complaintId={c.id}
+        equipment={customerEquipment}
+        brands={brands}
+        currentEquipmentId={c.equipmentId}
+        canAdd={!complete}
+        canDelete={!complete}
+        visitServices={visitServices}
+        detailBasePath="/complaints"
+        addedCount={addedCount}
+        equipmentUpdated={query.equipmentUpdated === "1"}
+        equipmentDeleted={query.equipmentDeleted === "1"}
+      />
 
       {!complete && canAssign && (
         <Card className="mt-6">
@@ -390,7 +389,7 @@ export default async function ComplaintDetailPage({
         </Card>
       )}
 
-      {!complete && (
+      {!complete && c.equipmentId && (
         <div className="mt-6">
           <Card>
             <CardHeader

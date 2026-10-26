@@ -272,14 +272,6 @@ export default async function CustomerDetail({
                 </div>
               )}
             </div>
-            <div className="rounded-2xl border border-dashed border-brand-border p-4">
-              <div className="text-xs font-bold uppercase tracking-wide text-brand-muted">
-                Notes
-              </div>
-              <p className="mt-2 text-sm font-semibold leading-6 text-brand-secondary">
-                {c.notes || "No customer notes added."}
-              </p>
-            </div>
           </CardBody>
         </Card>
       </div>

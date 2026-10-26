@@ -414,7 +414,7 @@ export async function updateCompleteBill(id: string, formData: FormData) {
       alternateMobile: phoneNumber(formData.get("newCustomerAlternateMobile"), "Alternate mobile", false), email: optionalString(formData.get("newCustomerEmail")),
       address: requiredText(formData.get("newCustomerAddress"), "Address", 1000), city: requiredText(formData.get("newCustomerCity"), "City", 120),
       state: requiredText(formData.get("newCustomerState"), "State", 120), pinCode: indianPinCode(formData.get("newCustomerPinCode")),
-      gstNumber: optionalString(formData.get("newCustomerGstNumber")), notes: optionalString(formData.get("newCustomerNotes")),
+      gstNumber: optionalString(formData.get("newCustomerGstNumber")),
     },
     products: products.map((data, index) => ({ data, itemId: optionalString(formData.get(`items.${index}.itemId`)), expectedUnits: optionalString(formData.get(`items.${index}.existingUnits`)) })),
   }));
@@ -568,7 +568,6 @@ async function resolveCustomer(
         state: requiredText(formData.get("newCustomerState"), "State", 120),
         pinCode,
         gstNumber: optionalString(formData.get("newCustomerGstNumber")),
-        notes: optionalString(formData.get("newCustomerNotes")),
       },
     });
     return customer.id;

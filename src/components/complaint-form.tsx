@@ -144,13 +144,13 @@ export function ComplaintForm({
           <ModeButton
             active={isExistingCustomer}
             title="Existing Customer"
-            text="Find an existing customer by name, phone or invoice."
+            text="Use a customer already saved from a bill or earlier service."
             onClick={() => setCustomerMode("existing")}
           />
           <ModeButton
             active={isNewCustomer}
             title="New Customer"
-            text="Create a customer while registering this complaint."
+            text="Create a first-time VFE or external-equipment service customer."
             onClick={() => {
               setCustomerMode("new");
               setCustomerId("");
@@ -256,9 +256,6 @@ export function ComplaintForm({
           <Field label="GST Number">
             <Input name="newCustomerGstNumber" />
           </Field>
-          <Field label="Customer Notes">
-            <Input name="newCustomerNotes" />
-          </Field>
         </div>
       )}
 
@@ -267,14 +264,14 @@ export function ComplaintForm({
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-brand-ink">Equipment</h2>
             <p className="mt-0.5 text-sm text-brand-muted">
-              Select one or more machines. A separate traceable complaint will be
-              created for each selected machine.
+              Select registered machine(s). For external equipment, create the
+              complaint now and identify the machine at the visit.
             </p>
           </div>
           <div className="grid gap-2 md:grid-cols-2">
             <ModeButton
               active={equipmentMode === "existing"}
-              title="Existing Equipment"
+              title="Registered Equipment"
               text={
                 canUseExistingEquipment
                   ? "Select one or more customer machines."
@@ -285,8 +282,8 @@ export function ComplaintForm({
             />
             <ModeButton
               active={equipmentMode === "unknown"}
-              title="Not Known"
-              text="Register one complaint without machine details."
+              title="Equipment Not Yet Registered"
+              text="Office staff or the assigned technician can register and link it at the visit."
               onClick={() => {
                 setEquipmentMode("unknown");
                 setSelectedEquipmentIds([]);
@@ -299,7 +296,7 @@ export function ComplaintForm({
       {equipmentMode === "existing" && (
         <div className="md:col-span-2 xl:col-span-3">
           <Field
-            label="Existing Equipment"
+            label="Registered Equipment"
             required
           >
             <Select

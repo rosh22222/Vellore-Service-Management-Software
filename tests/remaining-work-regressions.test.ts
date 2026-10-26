@@ -46,6 +46,34 @@ test("new complaint supports customer lookup, multiple equipment and multiple te
   assert.doesNotMatch(form, /selected — each machine receives its own complaint number/);
 });
 
+test("customer notes are removed without affecting complaint office notes", () => {
+  for (const path of [
+    "src/components/complaint-form.tsx",
+    "src/components/bill-detail-form.tsx",
+    "src/app/(dashboard)/customers/new/page.tsx",
+    "src/app/(dashboard)/customers/[id]/edit/page.tsx",
+    "src/app/(dashboard)/customers/[id]/page.tsx",
+    "src/actions/complaint.ts",
+    "src/actions/bill-detail.ts",
+    "src/actions/customer.ts",
+  ]) {
+    const file = source(path);
+    assert.doesNotMatch(file, /newCustomerNotes/);
+    assert.doesNotMatch(file, /Customer Notes/);
+  }
+
+  const schema = source("prisma/schema.prisma");
+  const customerModel = schema.slice(
+    schema.indexOf("model Customer {"),
+    schema.indexOf("model CustomerEquipment {"),
+  );
+  assert.doesNotMatch(customerModel, /\bnotes\s+String/);
+
+  const complaintForm = source("src/components/complaint-form.tsx");
+  assert.match(complaintForm, /label="Office Notes"/);
+  assert.match(complaintForm, /name="notes"/);
+});
+
 test("bill details uses the unified complaint form instead of a second limited form", () => {
   const billPage = source("src/app/(dashboard)/bill-details/[id]/page.tsx");
   const complaintForm = source("src/components/complaint-form.tsx");
@@ -128,6 +156,93 @@ test("every technician assigned through completion receives service credit", () 
   }
 
   assert.match(technicianProfile, /endedReason: "Service completed"/);
+});
+
+test("completed complaint shows every technician credited for the service", () => {
+  const complaint = source("src/app/(dashboard)/complaints/[id]/page.tsx");
+
+  assert.match(complaint, /technicianNameSnapshot\?\.trim\(\)/);
+  assert.match(complaint, /assignment\.endedReason === "Service completed"/);
+  assert.match(complaint, /Technician\(s\) Who Worked on This Service/);
+  assert.match(complaint, /Service Completed On/);
+  assert.match(complaint, /Permanent Service Record/);
+});
+
+test("complaint equipment registration uses the active brand master dropdown", () => {
+  const complaint = source("src/app/(dashboard)/complaints/[id]/page.tsx");
+  const workspace = source(
+    "src/components/complaint-equipment-workspace.tsx",
+  );
+
+  assert.match(complaint, /getCachedActiveBrands/);
+  assert.match(workspace, /<Select name="newEquipmentBrand"/);
+  assert.match(workspace, /brands\.map\(\(brand\)/);
+  assert.doesNotMatch(workspace, /<Input name="newEquipmentBrand"/);
+});
+
+test("office and assigned technicians can identify and service several machines separately", () => {
+  const action = source("src/actions/complaint.ts");
+  const schema = source("prisma/schema.prisma");
+  const workspace = source(
+    "src/components/complaint-equipment-workspace.tsx",
+  );
+  const selector = source("src/components/visit-equipment-selector.tsx");
+  const complaint = source("src/app/(dashboard)/complaints/[id]/page.tsx");
+  const job = source("src/app/(dashboard)/jobs/[id]/page.tsx");
+  const newComplaint = source("src/components/complaint-form.tsx");
+
+  assert.match(action, /export async function addComplaintEquipmentServiceFromForm/);
+  assert.match(action, /requireComplaintAccess\(sourceComplaintId\)/);
+  assert.match(action, /Additional equipment added from/);
+  assert.match(action, /serviceAssignment\.createMany/);
+  assert.match(action, /Added during the same visit as/);
+  assert.match(action, /formData\.getAll\("equipmentIds"\)/);
+  assert.match(action, /equipmentProblem\.\$\{equipmentId\}/);
+  assert.match(action, /serviceVisitGroupId/);
+  assert.match(action, /equipmentAdded=\$\{result\.complaints\.length\}/);
+  assert.match(action, /Identify or register the equipment before completing service/);
+  assert.match(schema, /serviceVisitGroupId\s+String\?/);
+  assert.match(workspace, /Register & Link External Equipment/);
+  assert.match(workspace, /More Equipment at This Visit/);
+  assert.match(workspace, /Equipment Services in This Visit/);
+  assert.match(workspace, /VisitEquipmentSelector/);
+  assert.match(workspace, /Create Service Jobs for Selected Equipment/);
+  assert.match(workspace, /one service job per machine/);
+  assert.match(workspace, /Problem on This Equipment/);
+  assert.match(selector, /type="checkbox"/);
+  assert.match(selector, /name=\{`equipmentProblem\.\$\{id\}`\}/);
+  assert.match(complaint, /<ComplaintEquipmentWorkspace/);
+  assert.match(complaint, /visitServices=\{visitServices\}/);
+  assert.match(complaint, /detailBasePath="\/complaints"/);
+  assert.match(job, /<ComplaintEquipmentWorkspace/);
+  assert.match(job, /visitServices=\{visitServices\}/);
+  assert.match(job, /detailBasePath="\/jobs"/);
+  assert.match(job, /!complete && c\.equipmentId/);
+  assert.match(newComplaint, /Equipment Not Yet Registered/);
+  assert.match(newComplaint, /assigned technician can register and link it at the visit/);
+});
+
+test("visit equipment is edited and safely deleted from the visit table", () => {
+  const action = source("src/actions/complaint.ts");
+  const workspace = source(
+    "src/components/complaint-equipment-workspace.tsx",
+  );
+  const rowActions = source("src/components/visit-service-actions.tsx");
+
+  assert.doesNotMatch(workspace, /Correct the equipment linked to this complaint/);
+  assert.doesNotMatch(workspace, /correct-equipment/);
+  assert.match(workspace, /<VisitServiceActions/);
+  assert.match(workspace, /canDelete=\{canDelete\}/);
+  assert.match(rowActions, /Edit Equipment Service/);
+  assert.match(rowActions, /Save Changes/);
+  assert.match(rowActions, /<ConfirmSubmitButton/);
+  assert.match(rowActions, /Delete/);
+  assert.match(action, /export async function updateVisitEquipmentServiceFromForm/);
+  assert.match(action, /export async function deleteVisitEquipmentServiceFromForm/);
+  assert.match(action, /Completed or closed equipment services cannot be edited/);
+  assert.match(action, /already has work or history/);
+  assert.match(action, /Only owner or office staff can delete/);
+  assert.match(action, /serviceComplaint\.delete/);
 });
 
 test("credited technicians can open a completed job through service history", () => {

@@ -125,7 +125,7 @@ export async function createComplaint(formData: FormData) {
     throw new Error("Choose an existing or new customer.");
   if (!["existing", "unknown"].includes(equipmentMode))
     throw new Error(
-      "Choose existing equipment or Not Known. Add new products through Bill Details or Equipment.",
+      "Choose Registered Equipment or Equipment Not Yet Registered.",
     );
   const technicianIds = [
     ...new Set(
@@ -196,7 +196,6 @@ export async function createComplaint(formData: FormData) {
           state: requiredText(formData.get("newCustomerState"), "State", 120),
           pinCode,
           gstNumber: optionalString(formData.get("newCustomerGstNumber")),
-          notes: optionalString(formData.get("newCustomerNotes")),
         },
       });
       customerId = customer.id;
@@ -317,6 +316,12 @@ export async function createComplaint(formData: FormData) {
       }
       createdRows.push(row);
     }
+    if (createdRows.length > 1) {
+      await tx.serviceComplaint.updateMany({
+        where: { id: { in: createdRows.map((row) => row.id) } },
+        data: { serviceVisitGroupId: createdRows[0].id },
+      });
+    }
     if (technicianIds.length) {
       await tx.technician.updateMany({
         where: { id: { in: technicianIds } },
@@ -335,86 +340,112 @@ export async function createComplaint(formData: FormData) {
   redirect(`/complaints?created=${complaints.length}`);
 }
 
+async function resolveServiceEquipment(
+  tx: Prisma.TransactionClient,
+  customerId: string,
+  equipmentMode: string,
+  formData: FormData,
+) {
+  if (equipmentMode === "existing") {
+    const equipmentId = optionalString(formData.get("equipmentId"));
+    if (!equipmentId) throw new Error("Equipment is required.");
+    await lockEquipmentBills(tx, equipmentId);
+    const equipment = await tx.customerEquipment.findUnique({
+      where: { id: equipmentId },
+      select: { customerId: true },
+    });
+    if (!equipment || equipment.customerId !== customerId)
+      throw new Error("The selected equipment does not belong to this customer.");
+    return equipmentId;
+  }
+
+  if (equipmentMode !== "new") throw new Error("Invalid equipment option.");
+  const serialNumber = optionalString(formData.get("newEquipmentSerial"));
+  if (serialNumber) {
+    const existingSerial = await tx.customerEquipment.findUnique({
+      where: { serialNumber },
+      select: { id: true },
+    });
+    if (existingSerial)
+      throw new Error("This equipment serial number is already registered.");
+  }
+  const equipmentCode = await nextDocumentNumber(
+    tx,
+    "equipment",
+    "VFE-EQP-",
+  );
+  const equipment = await tx.customerEquipment.create({
+    data: {
+      equipmentCode,
+      customerId,
+      name: requiredText(formData.get("newEquipmentName"), "Equipment name", 200),
+      brand: optionalString(formData.get("newEquipmentBrand")),
+      modelNumber: optionalString(formData.get("newEquipmentModel")),
+      serialNumber,
+      purchaseDate: optionalDate(formData.get("newEquipmentPurchaseDate")),
+      invoiceNumber: optionalString(formData.get("newEquipmentInvoice")),
+      installationDate: optionalDate(
+        formData.get("newEquipmentInstallationDate"),
+      ),
+      warrantyStartDate: optionalDate(
+        formData.get("newEquipmentWarrantyStartDate"),
+      ),
+      warrantyExpiryDate: optionalDate(
+        formData.get("newEquipmentWarrantyExpiryDate"),
+      ),
+      warrantyDuration: optionalString(
+        formData.get("newEquipmentWarrantyDuration"),
+      ),
+      status: EquipmentStatus.ACTIVE,
+      notes: optionalString(formData.get("newEquipmentNotes")),
+    },
+  });
+  return equipment.id;
+}
+
 export async function linkComplaintEquipmentFromForm(formData: FormData) {
-  const user = await requireUser();
-  if (user.role === UserRole.TECHNICIAN)
-    throw new Error("Technicians cannot change complaint master data.");
   const complaintId = String(formData.get("complaintId") ?? "").trim();
   const equipmentMode = String(formData.get("equipmentMode") || "existing");
   if (!complaintId) throw new Error("Complaint is required.");
+  const { user } = await requireComplaintAccess(complaintId);
 
   const result = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "ServiceComplaint" WHERE id = ${complaintId} FOR UPDATE`;
     const complaint = await tx.serviceComplaint.findUnique({
       where: { id: complaintId },
-      include: { serviceRecord: true },
+      include: {
+        serviceRecord: true,
+        assignments: {
+          where: { isActive: true },
+          select: { technicianId: true },
+        },
+      },
     });
     if (!complaint) throw new Error("Complaint not found.");
     if (complaint.serviceRecord)
       throw new Error("Completed service records are immutable.");
+    if (
+      user.role === UserRole.TECHNICIAN &&
+      !complaint.assignments.some(
+        (assignment) => assignment.technicianId === user.technicianId,
+      )
+    )
+      throw new Error("You are not assigned to this job.");
+    if (user.role === UserRole.TECHNICIAN && complaint.equipmentId)
+      throw new Error(
+        "This job already has equipment linked. Ask the office to correct it.",
+      );
+    if (user.role === UserRole.TECHNICIAN && equipmentMode === "unknown")
+      throw new Error("Only office staff can remove an equipment link.");
 
     let equipmentId: string | null = null;
-    if (equipmentMode === "existing") {
-      equipmentId = optionalString(formData.get("equipmentId"));
-      if (!equipmentId) throw new Error("Equipment is required.");
-      await lockEquipmentBills(tx, equipmentId);
-      const equipment = await tx.customerEquipment.findUnique({
-        where: { id: equipmentId },
-        select: { customerId: true },
-      });
-      if (!equipment || equipment.customerId !== complaint.customerId)
-        throw new Error(
-          "The selected equipment does not belong to this customer.",
-        );
-    } else if (equipmentMode === "new") {
-      const serialNumber = optionalString(formData.get("newEquipmentSerial"));
-      if (serialNumber) {
-        const existingSerial = await tx.customerEquipment.findUnique({
-          where: { serialNumber },
-          select: { id: true },
-        });
-        if (existingSerial)
-          throw new Error("This equipment serial number is already registered.");
-      }
-      const equipmentCode = await nextDocumentNumber(
+    if (equipmentMode !== "unknown")
+      equipmentId = await resolveServiceEquipment(
         tx,
-        "equipment",
-        "VFE-EQP-",
+        complaint.customerId,
+        equipmentMode,
+        formData,
       );
-      const equipment = await tx.customerEquipment.create({
-        data: {
-          equipmentCode,
-          customerId: complaint.customerId,
-          name: requiredText(
-            formData.get("newEquipmentName"),
-            "Equipment name",
-            200,
-          ),
-          brand: optionalString(formData.get("newEquipmentBrand")),
-          modelNumber: optionalString(formData.get("newEquipmentModel")),
-          serialNumber,
-          purchaseDate: optionalDate(formData.get("newEquipmentPurchaseDate")),
-          invoiceNumber: optionalString(formData.get("newEquipmentInvoice")),
-          installationDate: optionalDate(
-            formData.get("newEquipmentInstallationDate"),
-          ),
-          warrantyStartDate: optionalDate(
-            formData.get("newEquipmentWarrantyStartDate"),
-          ),
-          warrantyExpiryDate: optionalDate(
-            formData.get("newEquipmentWarrantyExpiryDate"),
-          ),
-          warrantyDuration: optionalString(
-            formData.get("newEquipmentWarrantyDuration"),
-          ),
-          status: EquipmentStatus.ACTIVE,
-          notes: optionalString(formData.get("newEquipmentNotes")),
-        },
-      });
-      equipmentId = equipment.id;
-    } else if (equipmentMode !== "unknown") {
-      throw new Error("Invalid equipment option.");
-    }
 
     const { repeatIssueDetected, repeatReferenceServiceId } =
       await detectRepeatIssue(tx, equipmentId, complaint.customerComplaint);
@@ -440,6 +471,454 @@ export async function linkComplaintEquipmentFromForm(formData: FormData) {
   revalidatePath("/complaints");
   revalidatePath("/dashboard");
   revalidatePath("/teams");
+}
+
+export async function addComplaintEquipmentServiceFromForm(formData: FormData) {
+  const sourceComplaintId = requiredText(
+    formData.get("sourceComplaintId"),
+    "Source complaint",
+    100,
+  );
+  const equipmentMode = String(formData.get("equipmentMode") || "existing");
+  if (!["existing", "new"].includes(equipmentMode))
+    throw new Error("Choose registered or external equipment.");
+  const requestedEquipmentIds = equipmentMode === "existing"
+    ? [
+        ...new Set(
+          [...formData.getAll("equipmentIds"), formData.get("equipmentId")]
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean),
+        ),
+      ]
+    : [];
+  if (equipmentMode === "existing" && !requestedEquipmentIds.length)
+    throw new Error("Select at least one equipment item.");
+  if (requestedEquipmentIds.length > 25)
+    throw new Error("Select no more than 25 equipment items at one time.");
+  const externalProblem = equipmentMode === "new"
+    ? requiredText(
+        formData.get("customerComplaint"),
+        "Problem on this equipment",
+        3000,
+      )
+    : null;
+  const { user } = await requireComplaintAccess(sourceComplaintId);
+
+  const result = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "ServiceComplaint" WHERE id = ${sourceComplaintId} FOR UPDATE`;
+    const source = await tx.serviceComplaint.findUnique({
+      where: { id: sourceComplaintId },
+      include: {
+        serviceRecord: true,
+        assignments: {
+          where: { isActive: true },
+          select: { technicianId: true },
+          orderBy: { assignedAt: "asc" },
+        },
+      },
+    });
+    if (!source) throw new Error("Complaint not found.");
+    if (source.serviceRecord || terminalStatuses.includes(source.status))
+      throw new Error("Additional equipment cannot be added to a completed job.");
+    if (
+      user.role === UserRole.TECHNICIAN &&
+      !source.assignments.some(
+        (assignment) => assignment.technicianId === user.technicianId,
+      )
+    )
+      throw new Error("You are not assigned to this job.");
+
+    let equipmentEntries: Array<{
+      equipmentId: string;
+      customerComplaint: string;
+    }>;
+    if (equipmentMode === "existing") {
+      for (const equipmentId of [...requestedEquipmentIds].sort())
+        await lockEquipmentBills(tx, equipmentId);
+      const registeredEquipment = await tx.customerEquipment.findMany({
+        where: { id: { in: requestedEquipmentIds } },
+        select: { id: true, customerId: true, name: true },
+      });
+      if (
+        registeredEquipment.length !== requestedEquipmentIds.length ||
+        registeredEquipment.some(
+          (equipment) => equipment.customerId !== source.customerId,
+        )
+      )
+        throw new Error(
+          "One or more selected equipment items do not belong to this customer.",
+        );
+      if (requestedEquipmentIds.includes(source.equipmentId ?? ""))
+        throw new Error("The current job's equipment cannot be added again.");
+      const equipmentNames = new Map(
+        registeredEquipment.map((equipment) => [equipment.id, equipment.name]),
+      );
+      equipmentEntries = requestedEquipmentIds.map((equipmentId) => ({
+        equipmentId,
+        customerComplaint: requiredText(
+          formData.get(`equipmentProblem.${equipmentId}`) ??
+            formData.get("customerComplaint"),
+          `Problem for ${equipmentNames.get(equipmentId) ?? "selected equipment"}`,
+          3000,
+        ),
+      }));
+    } else {
+      const equipmentId = await resolveServiceEquipment(
+        tx,
+        source.customerId,
+        equipmentMode,
+        formData,
+      );
+      equipmentEntries = [
+        { equipmentId, customerComplaint: externalProblem! },
+      ];
+    }
+
+    const existingOpenComplaints = await tx.serviceComplaint.findMany({
+      where: {
+        id: { not: sourceComplaintId },
+        equipmentId: { in: equipmentEntries.map((item) => item.equipmentId) },
+        status: { notIn: terminalStatuses },
+      },
+      select: { complaintNumber: true, equipmentId: true },
+    });
+    if (existingOpenComplaints.length)
+      throw new Error(
+        `Selected equipment already has open complaint ${existingOpenComplaints
+          .map((complaint) => complaint.complaintNumber)
+          .join(", ")}.`,
+      );
+
+    const serviceVisitGroupId = source.serviceVisitGroupId ?? source.id;
+    if (!source.serviceVisitGroupId) {
+      await tx.serviceComplaint.update({
+        where: { id: source.id },
+        data: { serviceVisitGroupId },
+      });
+    }
+    const complaintNumbers = await nextDocumentNumbers(
+      tx,
+      "complaint",
+      "VFE-SRV-",
+      equipmentEntries.length,
+    );
+    const technicianIds = source.assignments.map(
+      (assignment) => assignment.technicianId,
+    );
+    const currentTechnicianId = source.currentTechnicianId &&
+      technicianIds.includes(source.currentTechnicianId)
+      ? source.currentTechnicianId
+      : technicianIds[0] ?? null;
+    const complaintDate = new Date();
+    const complaints = [];
+    for (let index = 0; index < equipmentEntries.length; index += 1) {
+      const entry = equipmentEntries[index];
+      const { repeatIssueDetected, repeatReferenceServiceId } =
+        await detectRepeatIssue(
+          tx,
+          entry.equipmentId,
+          entry.customerComplaint,
+        );
+      const complaint = await tx.serviceComplaint.create({
+        data: {
+          complaintNumber: complaintNumbers[index],
+          complaintDate,
+          customerId: source.customerId,
+          equipmentId: entry.equipmentId,
+          customerComplaint: entry.customerComplaint,
+          complaintCategory: source.complaintCategory,
+          priority: source.priority,
+          preferredVisitDate: source.preferredVisitDate,
+          notes: source.notes,
+          source: source.source,
+          status: technicianIds.length
+            ? ServiceStatus.TECHNICIAN_ASSIGNED
+            : ServiceStatus.UNASSIGNED,
+          currentTechnicianId,
+          createdById: user.id,
+          serviceVisitGroupId,
+          repeatIssueDetected,
+          repeatReferenceServiceId,
+        },
+      });
+      await tx.serviceStatusHistory.create({
+        data: {
+          complaintId: complaint.id,
+          previousStatus: ServiceStatus.COMPLAINT_RECEIVED,
+          newStatus: complaint.status,
+          changedById: user.id,
+          notes: `Additional equipment added from ${source.complaintNumber}.`,
+        },
+      });
+      if (technicianIds.length) {
+        await tx.serviceAssignment.createMany({
+          data: technicianIds.map((technicianId) => ({
+            complaintId: complaint.id,
+            technicianId,
+            assignedById: user.id,
+            reason: `Added during the same visit as ${source.complaintNumber}.`,
+          })),
+        });
+      }
+      complaints.push(complaint);
+    }
+    if (technicianIds.length) {
+      await tx.technician.updateMany({
+        where: { id: { in: technicianIds } },
+        data: { status: TechnicianStatus.BUSY },
+      });
+    }
+    return {
+      complaints,
+      equipmentIds: equipmentEntries.map((item) => item.equipmentId),
+      customerId: source.customerId,
+    };
+  });
+
+  revalidateOperationalLookups();
+  for (const path of [
+    "/complaints",
+    "/jobs",
+    "/teams",
+    "/dashboard",
+    `/customers/${result.customerId}`,
+    `/complaints/${sourceComplaintId}`,
+    `/jobs/${sourceComplaintId}`,
+  ])
+    revalidatePath(path);
+  for (const equipmentId of result.equipmentIds)
+    revalidatePath(`/equipment/${equipmentId}`);
+  redirect(
+    user.role === UserRole.TECHNICIAN
+      ? `/jobs/${sourceComplaintId}?equipmentAdded=${result.complaints.length}`
+      : `/complaints/${sourceComplaintId}?equipmentAdded=${result.complaints.length}`,
+  );
+}
+
+export async function updateVisitEquipmentServiceFromForm(formData: FormData) {
+  const complaintId = requiredText(
+    formData.get("complaintId"),
+    "Service complaint",
+    100,
+  );
+  const requestedReturnId = optionalString(formData.get("returnComplaintId"));
+  const customerComplaint = requiredText(
+    formData.get("customerComplaint"),
+    "Customer complaint / problem reported",
+    3000,
+  );
+  const equipmentName = requiredText(
+    formData.get("equipmentName"),
+    "Equipment name",
+    200,
+  );
+  const brand = optionalString(formData.get("equipmentBrand"));
+  const modelNumber = optionalString(formData.get("equipmentModel"));
+  const serialNumber = optionalString(formData.get("equipmentSerial"));
+  const equipmentNotes = optionalString(formData.get("equipmentNotes"));
+  const { user } = await requireComplaintAccess(complaintId);
+
+  const result = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "ServiceComplaint" WHERE id = ${complaintId} FOR UPDATE`;
+    const complaint = await tx.serviceComplaint.findUnique({
+      where: { id: complaintId },
+      include: { serviceRecord: true, equipment: true },
+    });
+    if (!complaint) throw new Error("Service complaint not found.");
+    if (complaint.serviceRecord || terminalStatuses.includes(complaint.status))
+      throw new Error(
+        "Completed or closed equipment services cannot be edited.",
+      );
+    if (!complaint.equipment)
+      throw new Error("Link or register equipment before editing its details.");
+
+    if (serialNumber) {
+      const duplicate = await tx.customerEquipment.findFirst({
+        where: {
+          serialNumber,
+          id: { not: complaint.equipment.id },
+        },
+        select: { id: true },
+      });
+      if (duplicate)
+        throw new Error("This serial number belongs to another equipment item.");
+    }
+
+    await tx.customerEquipment.update({
+      where: { id: complaint.equipment.id },
+      data: {
+        name: equipmentName,
+        brand,
+        modelNumber,
+        serialNumber,
+        notes: equipmentNotes,
+      },
+    });
+    const { repeatIssueDetected, repeatReferenceServiceId } =
+      await detectRepeatIssue(tx, complaint.equipment.id, customerComplaint);
+    await tx.serviceComplaint.update({
+      where: { id: complaint.id },
+      data: {
+        customerComplaint,
+        repeatIssueDetected,
+        repeatReferenceServiceId,
+      },
+    });
+
+    let returnComplaintId = complaint.id;
+    if (requestedReturnId) {
+      const requestedReturn = await tx.serviceComplaint.findUnique({
+        where: { id: requestedReturnId },
+        select: { id: true, customerId: true, serviceVisitGroupId: true },
+      });
+      const belongsToVisit = complaint.serviceVisitGroupId
+        ? requestedReturn?.serviceVisitGroupId === complaint.serviceVisitGroupId
+        : requestedReturn?.id === complaint.id;
+      if (
+        requestedReturn?.customerId === complaint.customerId &&
+        belongsToVisit
+      )
+        returnComplaintId = requestedReturn.id;
+    }
+    return {
+      returnComplaintId,
+      customerId: complaint.customerId,
+      equipmentId: complaint.equipment.id,
+    };
+  });
+
+  revalidateOperationalLookups();
+  for (const path of [
+    "/complaints",
+    "/jobs",
+    "/dashboard",
+    `/customers/${result.customerId}`,
+    `/equipment/${result.equipmentId}`,
+    `/complaints/${result.returnComplaintId}`,
+    `/jobs/${result.returnComplaintId}`,
+  ])
+    revalidatePath(path);
+  redirect(
+    user.role === UserRole.TECHNICIAN
+      ? `/jobs/${result.returnComplaintId}?equipmentUpdated=1#equipment-services`
+      : `/complaints/${result.returnComplaintId}?equipmentUpdated=1#equipment-services`,
+  );
+}
+
+export async function deleteVisitEquipmentServiceFromForm(formData: FormData) {
+  const complaintId = requiredText(
+    formData.get("complaintId"),
+    "Service complaint",
+    100,
+  );
+  const requestedReturnId = optionalString(formData.get("returnComplaintId"));
+  const { user } = await requireComplaintAccess(complaintId);
+  if (user.role === UserRole.TECHNICIAN)
+    throw new Error(
+      "Only owner or office staff can delete an equipment service entry.",
+    );
+
+  const result = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "ServiceComplaint" WHERE id = ${complaintId} FOR UPDATE`;
+    const complaint = await tx.serviceComplaint.findUnique({
+      where: { id: complaintId },
+      include: {
+        serviceRecord: true,
+        inspection: { select: { id: true } },
+        assignments: {
+          where: { isActive: true },
+          select: { technicianId: true },
+        },
+        _count: {
+          select: {
+            workLogs: true,
+            parts: true,
+            serviceCollections: true,
+          },
+        },
+      },
+    });
+    if (!complaint) throw new Error("Service complaint not found.");
+    if (
+      complaint.serviceRecord ||
+      complaint.inspection ||
+      complaint._count.workLogs ||
+      complaint._count.parts ||
+      complaint._count.serviceCollections ||
+      !(
+        [
+          ServiceStatus.UNASSIGNED,
+          ServiceStatus.TECHNICIAN_ASSIGNED,
+        ] as ServiceStatus[]
+      ).includes(complaint.status)
+    )
+      throw new Error(
+        "This equipment service already has work or history. It cannot be deleted safely.",
+      );
+
+    const remaining = complaint.serviceVisitGroupId
+      ? await tx.serviceComplaint.findMany({
+          where: {
+            serviceVisitGroupId: complaint.serviceVisitGroupId,
+            id: { not: complaint.id },
+          },
+          select: { id: true },
+          orderBy: [{ complaintDate: "asc" }, { createdAt: "asc" }],
+        })
+      : [];
+    const requestedStillExists =
+      requestedReturnId && requestedReturnId !== complaint.id
+        ? remaining.some((item) => item.id === requestedReturnId)
+        : false;
+    const returnComplaintId = requestedStillExists
+      ? requestedReturnId!
+      : remaining[0]?.id ?? null;
+    const technicianIds = Array.from(
+      new Set(complaint.assignments.map((item) => item.technicianId)),
+    );
+
+    await tx.serviceComplaint.delete({ where: { id: complaint.id } });
+    for (const technicianId of technicianIds) {
+      const otherActiveJobs = await tx.serviceAssignment.count({
+        where: {
+          technicianId,
+          isActive: true,
+          complaint: { status: { notIn: terminalStatuses } },
+        },
+      });
+      await tx.technician.update({
+        where: { id: technicianId },
+        data: {
+          status: otherActiveJobs
+            ? TechnicianStatus.BUSY
+            : TechnicianStatus.AVAILABLE,
+        },
+      });
+    }
+    return {
+      returnComplaintId,
+      customerId: complaint.customerId,
+      equipmentId: complaint.equipmentId,
+    };
+  });
+
+  revalidateOperationalLookups();
+  for (const path of [
+    "/complaints",
+    "/jobs",
+    "/teams",
+    "/dashboard",
+    `/customers/${result.customerId}`,
+  ])
+    revalidatePath(path);
+  if (result.equipmentId) revalidatePath(`/equipment/${result.equipmentId}`);
+  if (result.returnComplaintId) {
+    revalidatePath(`/complaints/${result.returnComplaintId}`);
+    redirect(
+      `/complaints/${result.returnComplaintId}?equipmentDeleted=1#equipment-services`,
+    );
+  }
+  redirect("/complaints?equipmentDeleted=1");
 }
 
 export async function assignTechnician(
@@ -902,6 +1381,10 @@ export async function completeService(complaintId: string, formData: FormData) {
       throw new Error("A technician must be assigned before completion.");
     if (!complaint.assignments.length)
       throw new Error("At least one active technician must be assigned before completion.");
+    if (!complaint.equipment)
+      throw new Error(
+        "Identify or register the equipment before completing service so its permanent history is saved.",
+      );
 
     await tx.serviceInspection.upsert({
       where: { complaintId },

@@ -28,7 +28,7 @@ type ProductRow = {
 
 export type BillEditDefaults = {
   id: string; billDate: string; billVersion: string;
-  customer: { name: string; type: string; primaryMobile: string; alternateMobile: string | null; email: string | null; address: string; city: string; state: string; pinCode: string | null; gstNumber: string | null; notes: string | null; updatedAt: string };
+  customer: { name: string; type: string; primaryMobile: string; alternateMobile: string | null; email: string | null; address: string; city: string; state: string; pinCode: string | null; gstNumber: string | null; updatedAt: string };
   products: ProductRow[];
 };
 
@@ -196,16 +196,6 @@ export function BillDetailForm({
           <Field label="GST Number">
             <Input name="newCustomerGstNumber" defaultValue={editing?.customer.gstNumber ?? ""} />
           </Field>
-          <div className="md:col-span-2 xl:col-span-4">
-            <Field label="Customer Notes">
-              <Textarea
-                name="newCustomerNotes"
-                defaultValue={editing?.customer.notes ?? ""}
-                rows={3}
-                placeholder="Enter customer notes or special instructions..."
-              />
-            </Field>
-          </div>
         </>
       )}
 

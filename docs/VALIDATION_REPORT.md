@@ -1,5 +1,25 @@
 # Validation Report
 
+## On-site external and multi-equipment service workflow - 26 October 2026
+
+Improved complaint equipment handling for first-time customers, external machines and gyms with several machines. Existing/New Customer now describes only whether the customer profile already exists. Registered Equipment is separate from Equipment Not Yet Registered.
+
+- When a complaint has no machine, office staff or an assigned technician can select registered equipment or register and link external equipment using name, active brand, model, serial and optional identification notes.
+- Office staff and assigned technicians can add several registered machines together during the same visit. External machines can be registered successively without leaving the visit. Each machine receives a separate complaint number, copied technician team and its own required problem description, diagnosis, work performed, charge and permanent service history.
+- Equipment Services in This Visit lists every machine, problem and status together. Office users can open, edit or safely delete a mistaken entry directly in the table; technicians can open and edit the assigned machines. Editing covers machine identity and the reported problem. Deletion uses the custom confirmation dialog and is blocked after inspection, work, parts, completion or payment history exists.
+- Removed the separate “Correct the equipment linked to this complaint” control. A wrong visit entry is now corrected with Edit or removed with Delete in the same table. Deleting the visit entry does not silently delete the customer’s equipment master record.
+- Completion is unavailable and server-blocked until equipment is linked, preventing machine-less permanent service records.
+- The Supabase visit-group migration is applied and the schema is current. TypeScript, all 75 automated tests and the optimized production build passed for the completed workflow.
+
+## Customer Notes removal - 25 October 2026
+
+Removed the customer-level `notes` field from New Complaint, New/Edit Bill, New/Edit Customer, Customer Profile, all related server actions and the Prisma schema. Complaint Office Notes, bill item notes, equipment notes, assignment notes and completion details remain unchanged.
+
+- Confirmed the configured Supabase database contained zero non-empty customer notes before the destructive schema change.
+- Applied migration `20261025000100_remove_customer_notes` to Supabase and verified that the `Customer.notes` column no longer exists. The two existing customer records were preserved.
+- Prisma Client generation and TypeScript checking passed.
+- All 71 automated tests passed, including a regression that prevents Customer Notes from returning while preserving complaint Office Notes.
+
 ## Five requested workflow improvements - 21 October 2026
 
 Status: implemented and validated as a production candidate.
@@ -109,13 +129,6 @@ Verified:
 - Applied migration 10 to Supabase. Compared hashes of every original record across 17 existing tables: all remained unchanged. Existing customer/bill/item counts stayed at 2/2/2. Equipment increased from 2 to 5: three missing machines were registered for the existing quantity-4 purchase. All five purchased units have machine links. No live demo customers, bills, complaints or repairs were added.
 
 The development server was stopped only to release Windows' locked Prisma driver for regeneration. Restart it with `npm run dev` before checking the updated screens. Database credentials and `.env.local` were not changed. The old local customer database was not started or modified; testing used a new isolated PostgreSQL cluster under `.runtime/quantity-qa-20261015`.
-
-## Larger Customer Notes field - 15 October 2026
-
-Changed Customer Notes on New Bill Details from a single-line input to a full-width, vertically resizable textarea using the same shared styling as Item Notes. It starts with three rows and retains the existing `newCustomerNotes` field name and save logic.
-
-- TypeScript checking and all 22 regression tests passed.
-- Authenticated page/DOM checks confirmed the textarea, full-width wrapper, matching Item Notes styling and preservation of multiline content in FormData. The form was not submitted and no database records were changed.
 
 ## Updated logo and owner avatar - 15 October 2026
 

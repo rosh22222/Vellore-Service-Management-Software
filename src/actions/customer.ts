@@ -39,7 +39,6 @@ export async function createCustomer(formData: FormData) {
         state,
         pinCode,
         gstNumber: optionalString(formData.get("gstNumber")),
-        notes: optionalString(formData.get("notes")),
       },
     });
     return row;
@@ -80,7 +79,6 @@ export async function updateCustomer(id: string, formData: FormData) {
         state,
         pinCode,
         gstNumber: optionalString(formData.get("gstNumber")),
-        notes: optionalString(formData.get("notes")),
       },
     });
   });
