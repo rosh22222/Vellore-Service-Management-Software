@@ -1,7 +1,7 @@
 "use server";
 
 import { PaymentMode, UserRole } from "@prisma/client";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { db } from "@/lib/db";
 import { requireRoles, requireUser } from "@/lib/auth";
 import {
@@ -13,6 +13,8 @@ import {
 import { nextDocumentNumber } from "@/lib/ids";
 
 function revalidateCollectionPaths(serviceRecordId?: string) {
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath("/service-collections");
   revalidatePath("/service-history");
   revalidatePath("/reports");

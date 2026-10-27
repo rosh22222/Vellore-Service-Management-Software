@@ -76,6 +76,8 @@ export async function createTechnician(formData: FormData) {
   });
   revalidateTag("authorization-users");
   revalidateTag("technician-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath("/teams");
   redirect(`/technicians/${tech.id}`);
 }
@@ -140,6 +142,8 @@ export async function updateTechnician(id: string, formData: FormData) {
 
   revalidateTag("authorization-users");
   revalidateTag("technician-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath("/teams");
   revalidatePath(`/technicians/${id}`);
   redirect(`/technicians/${id}?updated=1`);
@@ -179,6 +183,8 @@ export async function setTechnicianStatus(id: string, formData: FormData) {
   });
   revalidateTag("authorization-users");
   revalidateTag("technician-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath("/teams");
   revalidatePath(`/technicians/${id}`);
   revalidatePath("/teams");
@@ -221,6 +227,8 @@ export async function deleteTechnicianFromForm(formData: FormData) {
 
   revalidateTag("authorization-users");
   revalidateTag("technician-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath("/teams");
   redirect("/teams");
 }

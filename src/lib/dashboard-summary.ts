@@ -1,4 +1,6 @@
-import type { Prisma } from "@prisma/client";
+import { ServiceStatus, type Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
+import { db } from "@/lib/db";
 export type DashboardSummary = {
   customers: number; equipment: number; newComplaints: number; completedToday: number; pending: number; warrantyServices: number;
   monthServiceValue: string; monthCollectedValue: string; paidForMonthlyServices: string; availableTechs: number; busyTechs: number;
@@ -19,3 +21,48 @@ export async function getDashboardSummary(db: Pick<Prisma.TransactionClient, "$q
     (SELECT count(*)::int FROM "Technician" WHERE "isActive" = true AND "status" = 'BUSY') AS "busyTechs"`;
   return summary;
 }
+
+// Dashboard numbers are shared by office users and are expensive when the app
+// and Supabase are in different regions. Mutating actions invalidate this tag,
+// so repeat navigation is fast without leaving the dashboard stale.
+export const getCachedDashboardPageData = unstable_cache(
+  async (startIso: string, endIso: string, monthStartIso: string) => {
+    const start = new Date(startIso);
+    const end = new Date(endIso);
+    const monthStart = new Date(monthStartIso);
+    const [summary, monthlyStatusCounts, recentRows] = await Promise.all([
+      getDashboardSummary(db, start, end, monthStart),
+      db.serviceComplaint.groupBy({
+        by: ["status"],
+        where: {
+          complaintDate: { gte: monthStart, lt: end },
+          status: { not: ServiceStatus.CANCELLED },
+        },
+        _count: { _all: true },
+      }),
+      db.serviceComplaint.findMany({
+        select: {
+          id: true,
+          complaintNumber: true,
+          customerComplaint: true,
+          status: true,
+          complaintDate: true,
+          customer: { select: { name: true } },
+          equipment: { select: { name: true } },
+        },
+        orderBy: { complaintDate: "desc" },
+        take: 4,
+      }),
+    ]);
+    return {
+      summary,
+      monthlyStatusCounts,
+      recentComplaints: recentRows.map((complaint) => ({
+        ...complaint,
+        complaintDate: complaint.complaintDate.toISOString(),
+      })),
+    };
+  },
+  ["dashboard-page-data-v1"],
+  { revalidate: 5 * 60, tags: ["dashboard-data"] },
+);

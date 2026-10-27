@@ -1,4 +1,5 @@
 import { ServiceStatus } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import { BarChart3, CheckCircle2, Clock3, Download, IndianRupee, ShieldCheck, Wrench } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireRoles } from "@/lib/auth";
@@ -57,8 +58,8 @@ export default async function ReportsPage({
   const { start, end } = businessRange(period, p.from, p.to);
   const invalidRange = period === "custom" && (!dateBoundary(p.from) || (p.to && (!dateBoundary(p.to) || p.from! > p.to)));
 
-  const [summaryRows, services, pendingRows, frequentEquipment, repeats, techStats] =
-    await Promise.all([
+  const getCachedReportData = unstable_cache(
+    async () => Promise.all([
     db.$queryRaw<ReportSummary[]>`SELECT
       (SELECT count(*)::int FROM "ServiceComplaint" WHERE "complaintDate" >= ${start} AND "complaintDate" <= ${end}) AS "complaints",
       (SELECT count(*)::int FROM "ServiceRecord" WHERE "serviceDate" >= ${start} AND "serviceDate" <= ${end}) AS "completed",
@@ -136,7 +137,12 @@ export default async function ReportsPage({
     FROM "Technician" t
     WHERE t."isActive" = true
     ORDER BY t."name" ASC`,
-  ]);
+    ]),
+    ["reports-page-data-v1", start.toISOString(), end.toISOString()],
+    { revalidate: 5 * 60, tags: ["reports-data"] },
+  );
+  const [summaryRows, services, pendingRows, frequentEquipment, repeats, techStats] =
+    await getCachedReportData();
 
   const summary = summaryRows[0] ?? {
     complaints: 0,

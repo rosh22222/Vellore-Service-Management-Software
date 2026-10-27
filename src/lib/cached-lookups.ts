@@ -2,7 +2,8 @@ import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 
 // Authorization remains database-backed, while a short cache avoids paying a
-// remote Supabase round trip for every click in the same working session.
+// remote Supabase round trip during ordinary navigation. Every in-app staff or
+// technician account change invalidates this tag immediately.
 export const getCachedAuthorizationUser = unstable_cache(
   async (id: string) =>
     db.user.findUnique({
@@ -19,7 +20,7 @@ export const getCachedAuthorizationUser = unstable_cache(
       },
     }),
   ["authorization-user-v1"],
-  { revalidate: 30, tags: ["authorization-users"] },
+  { revalidate: 5 * 60, tags: ["authorization-users"] },
 );
 
 // The sidebar needs only this stable identity field. Settings updates

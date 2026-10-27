@@ -8,6 +8,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { PinCodeInput } from "@/components/ui/pin-code-input";
 import { StateCitySelects } from "@/components/state-city-selects";
+import { VisitEquipmentEntryList } from "@/components/visit-equipment-entry-list";
 import { dateInput } from "@/lib/business-date";
 import { equipmentLabel } from "@/lib/equipment-label";
 import { titleCase } from "@/lib/format";
@@ -39,6 +40,7 @@ export function ComplaintForm({
   priorities,
   sources,
   technicians = [],
+  brands = [],
   canAssign = false,
 }: {
   customers: Customer[];
@@ -49,6 +51,7 @@ export function ComplaintForm({
   priorities: string[];
   sources: string[];
   technicians?: { id: string; name: string }[];
+  brands?: { name: string }[];
   canAssign?: boolean;
 }) {
   const [customerMode, setCustomerMode] = useState(
@@ -67,6 +70,7 @@ export function ComplaintForm({
     initialEquipmentId ? [initialEquipmentId] : [],
   );
   const [selectedTechnicianIds, setSelectedTechnicianIds] = useState<string[]>([]);
+  const [newEquipmentCount, setNewEquipmentCount] = useState(1);
 
   const customer = customers.find((item) => item.id === customerId);
   const filteredEquipment = useMemo(
@@ -145,7 +149,13 @@ export function ComplaintForm({
             active={isExistingCustomer}
             title="Existing Customer"
             text="Use a customer already saved from a bill or earlier service."
-            onClick={() => setCustomerMode("existing")}
+            onClick={() => {
+              setCustomerMode("existing");
+              const hasEquipment = equipment.some(
+                (item) => item.customerId === customerId,
+              );
+              setEquipmentMode(hasEquipment ? "existing" : "unknown");
+            }}
           />
           <ModeButton
             active={isNewCustomer}
@@ -156,7 +166,7 @@ export function ComplaintForm({
               setCustomerId("");
               setCustomerSearch("");
               setSelectedEquipmentIds([]);
-              if (equipmentMode === "existing") setEquipmentMode("unknown");
+              setEquipmentMode("unknown");
             }}
           />
         </div>
@@ -264,31 +274,57 @@ export function ComplaintForm({
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-brand-ink">Equipment</h2>
             <p className="mt-0.5 text-sm text-brand-muted">
-              Select registered machine(s). For external equipment, create the
-              complaint now and identify the machine at the visit.
+              {isNewCustomer
+                ? "Add all known machines now, or identify them later during the service visit."
+                : "Select registered machine(s), or identify unknown equipment during the service visit."}
             </p>
           </div>
           <div className="grid gap-2 md:grid-cols-2">
-            <ModeButton
-              active={equipmentMode === "existing"}
-              title="Registered Equipment"
-              text={
-                canUseExistingEquipment
-                  ? "Select one or more customer machines."
-                  : "Select a customer with equipment."
-              }
-              disabled={!canUseExistingEquipment}
-              onClick={() => setEquipmentMode("existing")}
-            />
-            <ModeButton
-              active={equipmentMode === "unknown"}
-              title="Equipment Not Yet Registered"
-              text="Office staff or the assigned technician can register and link it at the visit."
-              onClick={() => {
-                setEquipmentMode("unknown");
-                setSelectedEquipmentIds([]);
-              }}
-            />
+            {isNewCustomer ? (
+              <>
+                <ModeButton
+                  active={equipmentMode === "new"}
+                  title="+ Add Equipment"
+                  text="Register one or several machines with this complaint now."
+                  onClick={() => {
+                    setEquipmentMode("new");
+                    setSelectedEquipmentIds([]);
+                  }}
+                />
+                <ModeButton
+                  active={equipmentMode === "unknown"}
+                  title="Identify Equipment Later"
+                  text="Create the complaint now and add the machines from the service visit page."
+                  onClick={() => {
+                    setEquipmentMode("unknown");
+                    setSelectedEquipmentIds([]);
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <ModeButton
+                  active={equipmentMode === "existing"}
+                  title="Registered Equipment"
+                  text={
+                    canUseExistingEquipment
+                      ? "Select one or more customer machines."
+                      : "Select a customer with equipment."
+                  }
+                  disabled={!canUseExistingEquipment}
+                  onClick={() => setEquipmentMode("existing")}
+                />
+                <ModeButton
+                  active={equipmentMode === "unknown"}
+                  title="Equipment Not Yet Registered"
+                  text="Office staff or the assigned technician can register and link it at the visit."
+                  onClick={() => {
+                    setEquipmentMode("unknown");
+                    setSelectedEquipmentIds([]);
+                  }}
+                />
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -350,6 +386,15 @@ export function ComplaintForm({
         </div>
       )}
 
+      {isNewCustomer && equipmentMode === "new" && (
+        <div className="md:col-span-2 xl:col-span-3">
+          <VisitEquipmentEntryList
+            brands={brands}
+            onCountChange={setNewEquipmentCount}
+          />
+        </div>
+      )}
+
       <div className="md:col-span-2 xl:col-span-3 border-t border-brand-border pt-5" />
 
       <Field label="Complaint Date">
@@ -371,19 +416,21 @@ export function ComplaintForm({
         </Select>
       </Field>
 
-      <div className="md:col-span-2 xl:col-span-3">
-        <Field
-          label="Customer Complaint / Problem Reported"
-          required
-          hint="Keep exactly what the customer reported. Technician diagnosis is stored separately."
-        >
-          <Textarea
-            name="customerComplaint"
+      {equipmentMode !== "new" && (
+        <div className="md:col-span-2 xl:col-span-3">
+          <Field
+            label="Customer Complaint / Problem Reported"
             required
-            placeholder="Treadmill stops automatically after approximately 10 minutes."
-          />
-        </Field>
-      </div>
+            hint="Keep exactly what the customer reported. Technician diagnosis is stored separately."
+          >
+            <Textarea
+              name="customerComplaint"
+              required
+              placeholder="Treadmill stops automatically after approximately 10 minutes."
+            />
+          </Field>
+        </div>
+      )}
 
       <Field label="Complaint Source">
         <Select name="source" defaultValue="PHONE">
@@ -452,7 +499,9 @@ export function ComplaintForm({
           type="submit"
           disabled={equipmentMode === "existing" && selectedEquipmentIds.length === 0}
         >
-          {selectedEquipmentIds.length > 1
+          {equipmentMode === "new"
+            ? `Register ${newEquipmentCount} Equipment Service${newEquipmentCount === 1 ? "" : "s"}`
+            : selectedEquipmentIds.length > 1
             ? `Register ${selectedEquipmentIds.length} Complaints`
             : "Register Complaint"}
         </Button>

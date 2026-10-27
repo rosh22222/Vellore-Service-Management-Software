@@ -23,16 +23,17 @@ test("brand actions publish specific feedback in the shared three-second notice"
   assert.match(notice, /duration = 3000/);
 });
 
-test("office and technician complaint pages use one simplified completion form", () => {
+test("office and technician use one visit completion form", () => {
+  const completionForm = source(
+    "src/components/visit-service-completion.tsx",
+  );
   for (const path of [
     "src/app/(dashboard)/complaints/[id]/page.tsx",
     "src/app/(dashboard)/jobs/[id]/page.tsx",
   ]) {
     const page = source(path);
-    assert.match(page, /label="Actual Problem Found" required/);
-    assert.match(page, /name="actualProblem"\s+required/);
-    assert.match(page, /label="Work Performed" required/);
-    assert.match(page, /name="workDone"\s+required/);
+    assert.match(page, /<ComplaintEquipmentWorkspace/);
+    assert.doesNotMatch(page, /action=\{completeServiceFromForm\}/);
     for (const removed of [
       "Inspection / Actual Problem",
       "Completion Notes",
@@ -42,6 +43,11 @@ test("office and technician complaint pages use one simplified completion form",
       assert.equal(page.includes(removed), false, `${removed} must not appear in ${path}`);
     }
   }
+  assert.match(completionForm, /label="Actual Problem Found" required/);
+  assert.match(completionForm, /name="actualProblem"\s+required/);
+  assert.match(completionForm, /label="Work Performed" required/);
+  assert.match(completionForm, /name="workDone"\s+required/);
+  assert.match(completionForm, /Complete & Open Next Equipment/);
 
   const actions = source("src/actions/complaint.ts");
   const completion = actions.slice(

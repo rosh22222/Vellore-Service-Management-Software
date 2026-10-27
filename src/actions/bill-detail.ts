@@ -28,6 +28,7 @@ const DELETE_PROTECTED_MESSAGE =
 function revalidateBillLookups() {
   revalidateTag("customer-options");
   revalidateTag("equipment-options");
+  revalidateTag("dashboard-data");
 }
 
 function isProtectedDeleteError(error: unknown) {

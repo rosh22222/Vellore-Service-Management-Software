@@ -111,6 +111,7 @@ test("all success notices disappear after three seconds by default", async t => 
     )));
     assert.match(container.textContent!, /Profile updated/);
     await act(async () => container.querySelector("form")!.requestSubmit());
+    assert.equal(isLoading(), false, "An immediately completed action must not leave the page loader active");
     assert.match(container.textContent!, /Changes saved successfully/);
     await act(async () => t.mock.timers.tick(2999));
     assert.match(container.textContent!, /Profile updated/);
@@ -152,11 +153,22 @@ test("delete actions use the custom confirmation dialog instead of browser confi
   }
 });
 
-test("new complaint exposes Technician and Office Notes, not New Equipment or its fields", async () => {
+test("new customer complaint can register several equipment services before submitting", async () => {
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   try {
-    await act(async () => root.render(React.createElement(ComplaintForm, { customers: [], equipment: [], customerTypes: ["GYM"], priorities: ["NORMAL"], sources: ["PHONE"], technicians: [{ id: "tech-1", name: "Test Technician" }], canAssign: true })));
-    assert(!container.textContent!.includes("New Equipment")); assert.equal(container.querySelector('input[name="newEquipmentName"]'), null);
+    await act(async () => root.render(React.createElement(ComplaintForm, { customers: [], equipment: [], customerTypes: ["GYM"], priorities: ["NORMAL"], sources: ["PHONE"], technicians: [{ id: "tech-1", name: "Test Technician" }], brands: [{ name: "VFE Test" }], canAssign: true })));
+    const addEquipment = [...container.querySelectorAll("button")].find(button => button.textContent?.trim().startsWith("+ Add Equipment"))!;
+    assert(addEquipment);
+    await act(async () => addEquipment.click());
+    assert.match(container.textContent!, /Register Equipment for This Visit/);
+    assert.equal(container.querySelectorAll('input[name="equipmentRows"]').length, 1);
+    assert.equal(container.querySelector('textarea[name="customerComplaint"]'), null, "Each machine uses its own problem field");
+    assert.match(container.querySelector('select[name="equipmentBrand.1"]')!.textContent!, /VFE Test/);
+    const addAnother = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("Add Another Equipment"))!;
+    await act(async () => addAnother.click());
+    assert.equal(container.querySelectorAll('input[name="equipmentRows"]').length, 2);
+    assert(container.querySelector('input[name="equipmentName.2"]'));
+    assert(container.querySelector('textarea[name="equipmentProblem.2"]'));
     const technician = container.querySelector<HTMLInputElement>('input[name="technicianIds"]');
     assert(technician);
     assert.equal(technician.disabled, false);

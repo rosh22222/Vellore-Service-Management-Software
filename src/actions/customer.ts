@@ -44,6 +44,8 @@ export async function createCustomer(formData: FormData) {
     return row;
   });
   revalidateTag("customer-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath("/customers");
   redirect(`/customers/${customer.id}`);
 }
@@ -83,6 +85,8 @@ export async function updateCustomer(id: string, formData: FormData) {
     });
   });
   revalidateTag("customer-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath(`/customers/${id}`);
   revalidatePath("/customers");
 }

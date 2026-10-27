@@ -16,7 +16,6 @@ const nextConfig = (phase) => ({
       { pathname: "/vellore-logo-transparent.png" },
       { pathname: "/logo-VFE.png" },
       { pathname: "/avatar.png" },
-      { pathname: "/treadmill-hero.svg" },
     ],
   },
   async headers() {

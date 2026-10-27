@@ -1,15 +1,11 @@
-import { ActionForm } from "@/components/action-form";
 import { ComplaintEquipmentWorkspace } from "@/components/complaint-equipment-workspace";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { completeServiceFromForm } from "@/actions/complaint";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/form";
 import { date } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
 import { getCachedActiveBrands } from "@/lib/cached-lookups";
@@ -22,6 +18,7 @@ export default async function JobDetail({
   searchParams: Promise<{
     equipmentAdded?: string;
     equipmentUpdated?: string;
+    equipmentCompleted?: string;
   }>;
 }) {
   const user = await requireUser();
@@ -99,6 +96,18 @@ export default async function JobDetail({
             serialNumber: true,
             notes: true,
           },
+        },
+        inspection: { select: { actualProblem: true } },
+        workLogs: {
+          select: { workDone: true },
+          orderBy: { createdAt: "asc" },
+        },
+        assignments: {
+          where: { isActive: true },
+          select: { id: true },
+        },
+        serviceRecord: {
+          select: { id: true, serviceNumber: true },
         },
       },
       orderBy: [{ complaintDate: "asc" }, { createdAt: "asc" }],
@@ -178,9 +187,9 @@ export default async function JobDetail({
           brands={brands}
           currentEquipmentId={c.equipmentId}
           visitServices={visitServices}
-          detailBasePath="/jobs"
           addedCount={addedCount}
           equipmentUpdated={query.equipmentUpdated === "1"}
+          equipmentCompleted={query.equipmentCompleted === "1"}
         />
       )}
       <Card className="mt-6">
@@ -240,66 +249,6 @@ export default async function JobDetail({
           </table>
         </div>
       </Card>
-      {!complete && c.equipmentId && (
-        <div className="mt-6">
-          <Card>
-            <CardHeader
-              title="Complete Service"
-              subtitle={`Assigned team: ${activeAssignments.map((assignment) => assignment.technician.name).join(", ")}`}
-            />
-            <CardBody>
-              <ActionForm action={completeServiceFromForm} className="grid gap-5 md:grid-cols-2">
-                <input type="hidden" name="complaintId" value={c.id} />
-                <div className="md:col-span-2">
-                  <Field
-                    label="Customer Complaint / Problem Reported"
-                    hint="Copied from the office complaint for reference while completing the job."
-                  >
-                    <Textarea value={c.customerComplaint} readOnly rows={3} />
-                  </Field>
-                </div>
-                <Field label="Actual Problem Found" required>
-                  <Textarea
-                    name="actualProblem"
-                    required
-                    defaultValue={c.inspection?.actualProblem ?? ""}
-                    placeholder="Describe the actual fault found during service."
-                  />
-                </Field>
-                <Field label="Work Performed" required>
-                  <Textarea
-                    name="workDone"
-                    required
-                    defaultValue={c.workLogs.map((work) => work.workDone).join("\n")}
-                    placeholder="Describe the repair or service work completed."
-                  />
-                </Field>
-                <Field
-                  label="Service Amount"
-                  required
-                  hint="Total amount for this service. Enter 0 for warranty/free service."
-                >
-                  <Input
-                    name="charges"
-                    required
-                    type="text"
-                    inputMode="decimal"
-                    pattern="\d+(\.\d{1,2})?"
-                    title="Enter an amount using numbers with up to two decimal places."
-                    defaultValue="0"
-                  />
-                </Field>
-                <div className="self-end rounded-xl border border-brand-border bg-brand-faint p-4 text-sm text-brand-secondary">
-                  The office can record payment later from <b>Service Collections</b>.
-                </div>
-                <Button variant="success" className="md:col-span-2 md:justify-self-start">
-                  Complete Service
-                </Button>
-              </ActionForm>
-            </CardBody>
-          </Card>
-        </div>
-      )}
     </>
   );
 }

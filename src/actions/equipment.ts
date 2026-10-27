@@ -46,6 +46,8 @@ export async function createEquipment(formData: FormData) {
     return row;
   });
   revalidateTag("equipment-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath("/equipment");
   revalidatePath(`/customers/${customerId}`);
   redirect(`/equipment/${equipment.id}`);
@@ -159,6 +161,8 @@ export async function updateEquipment(id: string, formData: FormData) {
     return { customerId: row.customerId, billIds: linkedBillIds };
   });
   revalidateTag("equipment-options");
+  revalidateTag("dashboard-data");
+  revalidateTag("reports-data");
   revalidatePath(`/equipment/${id}`);
   revalidatePath(`/equipment/${id}/edit`);
   revalidatePath("/equipment");

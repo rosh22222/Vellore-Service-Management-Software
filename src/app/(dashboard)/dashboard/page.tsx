@@ -20,20 +20,13 @@ import {
   TechnicianStatus,
   WarrantyStatus,
 } from "@prisma/client";
-import { db } from "@/lib/db";
 import { requireRoles } from "@/lib/auth";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { date, money } from "@/lib/format";
 import { businessRange } from "@/lib/business-date";
-import { getDashboardSummary } from "@/lib/dashboard-summary";
-
-const closedStatuses = [
-  ServiceStatus.SERVICE_COMPLETED,
-  ServiceStatus.CLOSED,
-  ServiceStatus.CANCELLED,
-];
+import { getCachedDashboardPageData } from "@/lib/dashboard-summary";
 
 const activeStatuses = [
   ServiceStatus.TECHNICIAN_ACCEPTED,
@@ -52,23 +45,12 @@ export default async function DashboardPage() {
   const end = new Date(dayEnd.getTime() + 1);
   const monthStart = businessRange("month").start;
 
-  const [
-    summary,
-    monthlyStatusCounts,
-    recentComplaints,
-  ] = await Promise.all([
-    getDashboardSummary(db, start, end, monthStart),
-    db.serviceComplaint.groupBy({
-      by: ["status"],
-      where: { complaintDate: { gte: monthStart, lt: end }, status: { not: ServiceStatus.CANCELLED } },
-      _count: { _all: true },
-    }),
-    db.serviceComplaint.findMany({
-      include: { customer: true, equipment: true, currentTechnician: true },
-      orderBy: { complaintDate: "desc" },
-      take: 4,
-    }),
-  ]);
+  const { summary, monthlyStatusCounts, recentComplaints } =
+    await getCachedDashboardPageData(
+      start.toISOString(),
+      end.toISOString(),
+      monthStart.toISOString(),
+    );
 
   const { customers, equipment, newComplaints, completedToday, pending, warrantyServices, availableTechs, busyTechs } = summary;
   const monthServiceValue = Number(summary.monthServiceValue);

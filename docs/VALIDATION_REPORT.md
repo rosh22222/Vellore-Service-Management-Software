@@ -1,15 +1,30 @@
 # Validation Report
 
+## New-customer multi-equipment complaint registration - 27 October 2026
+
+- New Customer on `/complaints/new` now offers `+ Add Equipment` and `Identify Equipment Later`. Add Equipment opens the same reusable multi-machine entry UI used on complaint detail pages, including active brand selection, model, serial, optional notes, a required problem per machine, Add Another Equipment and Remove.
+- One submission atomically creates the customer, all equipment and one separate complaint per machine. Every complaint receives its own number and problem while sharing the same service-visit group and selected technician team. Duplicate serials or any invalid machine roll back the entire customer/equipment/complaint batch.
+- After saving equipment from New Complaint, the application opens the first complaint's Service Visit Workspace, where the user sees `0 of N equipment services completed`. Choosing Identify Equipment Later preserves the existing workflow so office staff or an assigned technician can register one or several machines from the complaint detail page.
+- The reusable entry component prevents the two workflows from drifting. TypeScript, all 75 automated tests, the optimized production build, and the read-only live smoke sweep passed. The live sweep returned 36 successful checks with authentication protection and 11 dynamic detail/edit routes.
+
+## Form loading lifecycle fix - 26 October 2026
+
+- Fixed the shared form handler so the full-screen loading UI remains visible until the server action and React/Next.js page refresh or redirect have both committed. The previous handler stopped the loader inside the async callback before the refreshed interface was ready, which exposed a confusing intermediate page state.
+- The fix applies centrally to all `ActionForm` create, update, delete, assignment, complaint, bill, brand, technician, settings and collection operations. Normal success/error feedback and duplicate-submit protection remain unchanged.
+- Added a regression safeguard for immediately completed actions so the loader cannot become stuck. TypeScript, all 75 automated tests and the optimized production build passed.
+
 ## On-site external and multi-equipment service workflow - 26 October 2026
 
 Improved complaint equipment handling for first-time customers, external machines and gyms with several machines. Existing/New Customer now describes only whether the customer profile already exists. Registered Equipment is separate from Equipment Not Yet Registered.
 
-- When a complaint has no machine, office staff or an assigned technician can select registered equipment or register and link external equipment using name, active brand, model, serial and optional identification notes.
+- When a complaint has no machine, office staff or an assigned technician can select registered equipment or enter up to 25 external machines before one final save. The repeatable Identify Equipment form provides Add Another Equipment and Remove controls, with a separate required problem description plus name, active brand, model, serial and optional identification notes for every machine.
+- The initial multi-machine save is one database transaction: the first machine is linked to the original complaint, every additional machine receives its own complaint number, and the complete technician team is copied to every service job. Duplicate serials or any failed entry roll back the whole batch instead of leaving a partially registered visit.
 - Office staff and assigned technicians can add several registered machines together during the same visit. External machines can be registered successively without leaving the visit. Each machine receives a separate complaint number, copied technician team and its own required problem description, diagnosis, work performed, charge and permanent service history.
-- Equipment Services in This Visit lists every machine, problem and status together. Office users can open, edit or safely delete a mistaken entry directly in the table; technicians can open and edit the assigned machines. Editing covers machine identity and the reported problem. Deletion uses the custom confirmation dialog and is blocked after inspection, work, parts, completion or payment history exists.
+- Service Visit Workspace lists every machine, problem and status together with completed/total progress. Every pending row has Add Service Details, which opens the machine-specific Actual Problem, Work Performed and Service Amount form without leaving the visit. Completing one machine automatically opens the next pending machine; the last completion confirms the entire visit is finished. There is no “Current” row label or duplicate completion form below the page.
+- Office users can edit or safely delete a mistaken entry directly in the table; technicians can edit assigned machines. Editing covers machine identity and the reported problem. Deletion uses the custom confirmation dialog and is blocked after inspection, work, parts, completion or payment history exists. Add Service Details remains hidden until a technician is assigned.
 - Removed the separate “Correct the equipment linked to this complaint” control. A wrong visit entry is now corrected with Edit or removed with Delete in the same table. Deleting the visit entry does not silently delete the customer’s equipment master record.
 - Completion is unavailable and server-blocked until equipment is linked, preventing machine-less permanent service records.
-- The Supabase visit-group migration is applied and the schema is current. TypeScript, all 75 automated tests and the optimized production build passed for the completed workflow.
+- The Supabase visit-group migration is applied and the schema is current. TypeScript, all 75 automated tests and the optimized production build passed for the completed workflow, including first-time batch equipment registration.
 
 ## Customer Notes removal - 25 October 2026
 
@@ -391,3 +406,10 @@ PDF/CSV exports; account disabling; and all owner/office/technician routes.
 Delivery note: commit and push the current working tree before deploying from
 GitHub/Vercel. The configured remote still points to the earlier first commit
 until that handoff step is completed.
+# Production region and navigation performance
+
+- Vercel Functions are pinned to `syd1`, matching the Supabase `ap-southeast-2` database region and removing the avoidable Washington-to-Sydney database round trip after deployment.
+- Authorization lookups use a five-minute cache that is invalidated immediately by in-app technician/staff changes.
+- The authenticated live-smoke suite now enforces response-time budgets in addition to checking status, content type, access control, dynamic pages and exports.
+- Final optimized production pass: 31 authenticated route/export/asset checks passed; warm average 792 ms, median 826 ms and p95 2,040 ms from the local India workstation to Sydney Supabase. Cached Dashboard and Reports responses measured 22 ms each.
+- Final automated result: TypeScript passed, all 75 regression tests passed, the optimized production build passed, and all 14 Supabase migrations are applied.

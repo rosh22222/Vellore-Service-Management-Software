@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
 import { date, money } from "@/lib/format";
 
 const terminalStatuses = [
@@ -16,11 +17,14 @@ const terminalStatuses = [
 
 export default async function ServiceRecordDetail({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ visitCompleted?: string }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
+  const query = await searchParams;
   const record = await db.serviceRecord.findUnique({
     where: { id },
     include: {
@@ -91,6 +95,12 @@ export default async function ServiceRecordDetail({
           </>
         }
       />
+      {query.visitCompleted === "1" && (
+        <AutoDismissNotice className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+          All equipment services in this customer visit are completed. Every
+          machine now has its own permanent service record.
+        </AutoDismissNotice>
+      )}
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader

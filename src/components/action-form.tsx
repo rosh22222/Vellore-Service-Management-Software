@@ -17,8 +17,23 @@ export function ActionForm({ action, children, successMessage, successDuration =
 }) {
   const [pending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+  const [actionSettled, setActionSettled] = useState(true);
   const submitting = useRef(false);
+  const stopLoadingRef = useRef<(() => void) | null>(null);
   const messageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (pending || !actionSettled || !stopLoadingRef.current) return;
+    const stopLoading = stopLoadingRef.current;
+    stopLoadingRef.current = null;
+    stopLoading();
+  }, [actionSettled, pending]);
+  useEffect(
+    () => () => {
+      stopLoadingRef.current?.();
+      stopLoadingRef.current = null;
+    },
+    [],
+  );
   useEffect(() => {
     if (!feedback?.ok || !successDuration) return;
     const timer = setTimeout(() => setFeedback(null), successDuration);
@@ -31,7 +46,9 @@ export function ActionForm({ action, children, successMessage, successDuration =
       submitting.current = true;
       const form = event.currentTarget;
       const data = new FormData(form);
-      const stopLoading = startLoading();
+      stopLoadingRef.current?.();
+      stopLoadingRef.current = startLoading();
+      setActionSettled(false);
       setFeedback(null);
       startTransition(async () => {
         try {
@@ -55,7 +72,7 @@ export function ActionForm({ action, children, successMessage, successDuration =
           setFeedback({ ok: false, message: "Connection interrupted. Check whether your change was saved before trying again." });
         } finally {
           submitting.current = false;
-          stopLoading();
+          setActionSettled(true);
         }
       });
     }}>

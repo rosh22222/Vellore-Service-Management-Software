@@ -5,6 +5,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { ComplaintForm } from "@/components/complaint-form";
 import {
   getCachedComplaintCustomerOptions,
+  getCachedActiveBrands,
   getCachedEquipmentOptions,
   getCachedTechnicianOptions,
 } from "@/lib/cached-lookups";
@@ -17,10 +18,11 @@ export default async function NewComplaintPage({
   const user = await requireRoles(["ADMIN", "OFFICE_STAFF"]);
   const canAssign = user.role === "ADMIN" || user.canAssignTechnician;
   const { customerId, equipmentId } = await searchParams;
-  const [customers, equipment, technicianOptions] = await Promise.all([
+  const [customers, equipment, technicianOptions, brands] = await Promise.all([
     getCachedComplaintCustomerOptions(),
     getCachedEquipmentOptions(),
     canAssign ? getCachedTechnicianOptions() : Promise.resolve([]),
+    getCachedActiveBrands(),
   ]);
   const technicians = technicianOptions
     .filter((technician) => !["INACTIVE", "ON_LEAVE"].includes(technician.status))
@@ -42,6 +44,7 @@ export default async function NewComplaintPage({
             priorities={Object.values(ComplaintPriority)}
             sources={Object.values(ComplaintSource)}
             technicians={technicians}
+            brands={brands}
             canAssign={canAssign}
           />
         </CardBody>

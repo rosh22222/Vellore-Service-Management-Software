@@ -85,15 +85,10 @@ test("bill details uses the unified complaint form instead of a second limited f
 });
 
 test("completion forms show the original customer complaint and Settings omits Website", () => {
-  for (const path of [
-    "src/app/(dashboard)/complaints/[id]/page.tsx",
-    "src/app/(dashboard)/jobs/[id]/page.tsx",
-  ]) {
-    const page = source(path);
-    assert.match(page, /label="Customer Complaint \/ Problem Reported"/);
-    assert.match(page, /value=\{c\.customerComplaint\}/);
-    assert.match(page, /readOnly/);
-  }
+  const completion = source("src/components/visit-service-completion.tsx");
+  assert.match(completion, /label="Customer Complaint \/ Problem Reported"/);
+  assert.match(completion, /value=\{customerComplaint\}/);
+  assert.match(completion, /readOnly/);
   const settings = source("src/app/(dashboard)/settings/page.tsx");
   const action = source("src/actions/settings.ts");
   assert.doesNotMatch(settings, /label="Website"/);
@@ -114,17 +109,14 @@ test("multiple technician assignments render as one combined row", () => {
 });
 
 test("service amounts are typed decimal text and cannot change by spinner or wheel", () => {
-  for (const path of [
-    "src/app/(dashboard)/complaints/[id]/page.tsx",
-    "src/app/(dashboard)/jobs/[id]/page.tsx",
-  ]) {
-    const page = source(path);
-    const serviceAmount = page.slice(page.indexOf('label="Service Amount"'));
-    assert.match(serviceAmount, /name="charges"/);
-    assert.match(serviceAmount, /type="text"/);
-    assert.match(serviceAmount, /inputMode="decimal"/);
-    assert.doesNotMatch(serviceAmount.slice(0, 700), /type="number"/);
-  }
+  const completion = source("src/components/visit-service-completion.tsx");
+  const serviceAmount = completion.slice(
+    completion.indexOf('label="Service Amount"'),
+  );
+  assert.match(serviceAmount, /name="charges"/);
+  assert.match(serviceAmount, /type="text"/);
+  assert.match(serviceAmount, /inputMode="decimal"/);
+  assert.doesNotMatch(serviceAmount.slice(0, 700), /type="number"/);
 });
 
 test("charts use unique keys when labels repeat", () => {
@@ -186,40 +178,66 @@ test("office and assigned technicians can identify and service several machines 
   const workspace = source(
     "src/components/complaint-equipment-workspace.tsx",
   );
-  const selector = source("src/components/visit-equipment-selector.tsx");
+  const identifyBatch = source(
+    "src/components/identify-equipment-batch-form.tsx",
+  );
+  const equipmentEntries = source(
+    "src/components/visit-equipment-entry-list.tsx",
+  );
   const complaint = source("src/app/(dashboard)/complaints/[id]/page.tsx");
   const job = source("src/app/(dashboard)/jobs/[id]/page.tsx");
   const newComplaint = source("src/components/complaint-form.tsx");
 
   assert.match(action, /export async function addComplaintEquipmentServiceFromForm/);
+  assert.match(action, /export async function registerAndLinkVisitEquipmentFromForm/);
+  assert.match(action, /\.getAll\("equipmentRows"\)/);
+  assert.match(action, /equipmentName\.\$\{rowId\}/);
+  assert.match(action, /equipmentProblem\.\$\{rowId\}/);
+  assert.match(action, /createdEquipment\[0\]\.id/);
+  assert.match(action, /entries\.length - 1/);
+  assert.match(action, /Equipment registered during the same visit as/);
   assert.match(action, /requireComplaintAccess\(sourceComplaintId\)/);
   assert.match(action, /Additional equipment added from/);
   assert.match(action, /serviceAssignment\.createMany/);
   assert.match(action, /Added during the same visit as/);
   assert.match(action, /formData\.getAll\("equipmentIds"\)/);
-  assert.match(action, /equipmentProblem\.\$\{equipmentId\}/);
+  assert.match(action, /Service requested for/);
   assert.match(action, /serviceVisitGroupId/);
   assert.match(action, /equipmentAdded=\$\{result\.complaints\.length\}/);
   assert.match(action, /Identify or register the equipment before completing service/);
   assert.match(schema, /serviceVisitGroupId\s+String\?/);
-  assert.match(workspace, /Register & Link External Equipment/);
-  assert.match(workspace, /More Equipment at This Visit/);
-  assert.match(workspace, /Equipment Services in This Visit/);
-  assert.match(workspace, /VisitEquipmentSelector/);
-  assert.match(workspace, /Create Service Jobs for Selected Equipment/);
-  assert.match(workspace, /one service job per machine/);
+  assert.match(workspace, /IdentifyEquipmentBatchForm/);
+  assert.doesNotMatch(workspace, /Add More Equipment to This Visit/);
+  assert.doesNotMatch(workspace, /Choose Registered Equipment/);
+  assert.match(workspace, /Service Visit Workspace/);
+  assert.match(workspace, /VisitServiceCompletion/);
+  assert.doesNotMatch(workspace, />\s*Current\s*</);
+  assert.doesNotMatch(workspace, /VisitEquipmentSelector/);
+  assert.match(workspace, /showExternalEquipmentRegistration/);
+  assert.match(workspace, /Register External Equipment &amp; Create Service Job/);
+  assert.match(workspace, /Add Service Details for each machine/);
   assert.match(workspace, /Problem on This Equipment/);
-  assert.match(selector, /type="checkbox"/);
-  assert.match(selector, /name=\{`equipmentProblem\.\$\{id\}`\}/);
+  assert.match(identifyBatch, /VisitEquipmentEntryList/);
+  assert.match(identifyBatch, /Register &amp; Link Equipment/);
+  assert.match(equipmentEntries, /name="equipmentRows"/);
+  assert.match(equipmentEntries, /\+ Add Another Equipment/);
+  assert.match(equipmentEntries, /Problem Reported for This Equipment/);
+  assert.match(equipmentEntries, /rows\.length >= MAX_EQUIPMENT_PER_VISIT/);
   assert.match(complaint, /<ComplaintEquipmentWorkspace/);
   assert.match(complaint, /visitServices=\{visitServices\}/);
-  assert.match(complaint, /detailBasePath="\/complaints"/);
+  assert.match(complaint, /equipmentCompleted=\{query\.equipmentCompleted === "1"\}/);
   assert.match(job, /<ComplaintEquipmentWorkspace/);
   assert.match(job, /visitServices=\{visitServices\}/);
-  assert.match(job, /detailBasePath="\/jobs"/);
-  assert.match(job, /!complete && c\.equipmentId/);
+  assert.match(job, /equipmentCompleted=\{query\.equipmentCompleted === "1"\}/);
+  assert.match(job, /!complete && \(/);
   assert.match(newComplaint, /Equipment Not Yet Registered/);
   assert.match(newComplaint, /assigned technician can register and link it at the visit/);
+  assert.match(newComplaint, /title="\+ Add Equipment"/);
+  assert.match(newComplaint, /<VisitEquipmentEntryList/);
+  assert.match(newComplaint, /equipmentMode !== "new"/);
+  assert.match(action, /equipmentMode === "new" \? parseNewVisitEquipmentEntries/);
+  assert.match(action, /equipmentCode: equipmentCodes\[index\]/);
+  assert.match(action, /customerComplaint: entry\.customerComplaint/);
 });
 
 test("visit equipment is edited and safely deleted from the visit table", () => {

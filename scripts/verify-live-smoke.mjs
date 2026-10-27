@@ -139,7 +139,6 @@ try {
   if (service) await check(`/api/service-reports/${service.id}`, cookie, "application/pdf");
   await check("/vellore-logo-transparent.png", null, "image/png");
   await check("/avatar.png", null, "image/png");
-  await check("/treadmill-hero.svg", null, "image/svg+xml");
 
   const pageResults = results.filter((result) => result.expectedType === "text/html");
   const orderedPageTimes = pageResults.map((result) => result.elapsed).sort((a, b) => a - b);
@@ -154,6 +153,16 @@ try {
     ? orderedPageTimes[Math.min(orderedPageTimes.length - 1, Math.ceil(orderedPageTimes.length * 0.95) - 1)]
     : 0;
   const slowest = [...pageResults].sort((a, b) => b.elapsed - a.elapsed).slice(0, 5);
+  const maxAveragePageMs = Number(process.env.QA_MAX_AVERAGE_PAGE_MS || 2000);
+  const maxP95PageMs = Number(process.env.QA_MAX_P95_PAGE_MS || 4000);
+  assert(
+    averagePageMs <= maxAveragePageMs,
+    `Average page response ${averagePageMs}ms exceeds ${maxAveragePageMs}ms budget.`,
+  );
+  assert(
+    p95PageMs <= maxP95PageMs,
+    `P95 page response ${p95PageMs}ms exceeds ${maxP95PageMs}ms budget.`,
+  );
   console.log(
     JSON.stringify(
       {
@@ -165,6 +174,10 @@ try {
           averageMs: averagePageMs,
           medianMs: medianPageMs,
           p95Ms: p95PageMs,
+          budget: {
+            averageMs: maxAveragePageMs,
+            p95Ms: maxP95PageMs,
+          },
         },
         slowest,
       },

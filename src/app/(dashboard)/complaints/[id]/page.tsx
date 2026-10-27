@@ -7,13 +7,12 @@ import { requireRoles } from "@/lib/auth";
 import {
   assignTechnicianFromForm,
   unassignTechnicianFromForm,
-  completeServiceFromForm,
 } from "@/actions/complaint";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { Field, Input, Select } from "@/components/ui/form";
 import { date, titleCase } from "@/lib/format";
 import { warrantyStatus } from "@/lib/warranty";
 import {
@@ -30,6 +29,8 @@ export default async function ComplaintDetailPage({
     equipmentAdded?: string;
     equipmentUpdated?: string;
     equipmentDeleted?: string;
+    equipmentCompleted?: string;
+    visitCompleted?: string;
   }>;
 }) {
   const user = await requireRoles(["ADMIN", "OFFICE_STAFF"]);
@@ -92,6 +93,18 @@ export default async function ComplaintDetailPage({
             serialNumber: true,
             notes: true,
           },
+        },
+        inspection: { select: { actualProblem: true } },
+        workLogs: {
+          select: { workDone: true },
+          orderBy: { createdAt: "asc" },
+        },
+        assignments: {
+          where: { isActive: true },
+          select: { id: true },
+        },
+        serviceRecord: {
+          select: { id: true, serviceNumber: true },
         },
       },
       orderBy: [{ complaintDate: "asc" }, { createdAt: "asc" }],
@@ -293,10 +306,11 @@ export default async function ComplaintDetailPage({
         canAdd={!complete}
         canDelete={!complete}
         visitServices={visitServices}
-        detailBasePath="/complaints"
         addedCount={addedCount}
         equipmentUpdated={query.equipmentUpdated === "1"}
         equipmentDeleted={query.equipmentDeleted === "1"}
+        equipmentCompleted={query.equipmentCompleted === "1"}
+        visitCompleted={query.visitCompleted === "1"}
       />
 
       {!complete && canAssign && (
@@ -387,71 +401,6 @@ export default async function ComplaintDetailPage({
             )}
           </CardBody>
         </Card>
-      )}
-
-      {!complete && c.equipmentId && (
-        <div className="mt-6">
-          <Card>
-            <CardHeader
-              title="Complete Service"
-              subtitle="Record what was found, what was done and the final service amount in one step."
-            />
-            <CardBody>
-              <ActionForm action={completeServiceFromForm} className="grid gap-5 md:grid-cols-2">
-                <input type="hidden" name="complaintId" value={c.id} />
-                <div className="md:col-span-2">
-                  <Field
-                    label="Customer Complaint / Problem Reported"
-                    hint="Copied from complaint registration for technician reference."
-                  >
-                    <Textarea value={c.customerComplaint} readOnly rows={3} />
-                  </Field>
-                </div>
-                <Field label="Actual Problem Found" required>
-                  <Textarea
-                    name="actualProblem"
-                    required
-                    defaultValue={c.inspection?.actualProblem ?? ""}
-                    placeholder="Describe the actual fault found during service."
-                  />
-                </Field>
-                <Field label="Work Performed" required>
-                  <Textarea
-                    name="workDone"
-                    required
-                    defaultValue={c.workLogs.map((work) => work.workDone).join("\n")}
-                    placeholder="Describe the repair or service work completed."
-                  />
-                </Field>
-                <Field
-                  label="Service Amount"
-                  required
-                  hint="Total amount for this service. Enter 0 for warranty/free service."
-                >
-                  <Input
-                    name="charges"
-                    required
-                    type="text"
-                    inputMode="decimal"
-                    pattern="\d+(\.\d{1,2})?"
-                    title="Enter an amount using numbers with up to two decimal places."
-                    defaultValue="0"
-                  />
-                </Field>
-                <div className="self-end rounded-xl border border-brand-border bg-brand-faint p-4 text-sm text-brand-secondary">
-                  Payments can be recorded later from <b>Service Collections</b>.
-                </div>
-                <Button
-                  type="submit"
-                  variant="success"
-                  className="md:col-span-2 md:justify-self-start"
-                >
-                  Complete & Create Permanent Record
-                </Button>
-              </ActionForm>
-            </CardBody>
-          </Card>
-        </div>
       )}
 
       <Card className="mt-6">
