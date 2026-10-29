@@ -104,7 +104,7 @@ export default async function ComplaintDetailPage({
           select: { id: true },
         },
         serviceRecord: {
-          select: { id: true, serviceNumber: true },
+          select: { id: true, serviceNumber: true, charges: true },
         },
       },
       orderBy: [{ complaintDate: "asc" }, { createdAt: "asc" }],

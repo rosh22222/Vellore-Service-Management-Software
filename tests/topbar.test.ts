@@ -35,6 +35,9 @@ test("owner and office headers link Add Bills directly to New Bill Details", () 
       const link = header.querySelector('a[href="/bill-details/new"]');
       assert.equal(link?.textContent, "Add Bills");
       assert.equal(header.querySelector('a[href="/complaints/new"]')?.textContent, "New Complaint");
+      assert.equal(header.querySelector('button[aria-label="Go back"]')?.textContent, "Back");
+      const identity = header.querySelector("div.flex.min-w-0.flex-1.items-center.gap-3");
+      assert.equal(identity?.firstElementChild?.getAttribute("aria-label"), "Go back");
       assert(header.querySelector('button[aria-label="Log out"]'));
       if (role === "ADMIN") assert.match(header.textContent!, /D SATHYAN/);
     } finally {
@@ -49,6 +52,7 @@ test("technician header keeps logout without exposing the office-only bill short
     const header = dom.window.document.querySelector("header")!;
     assert.equal(header.querySelector('a[href="/bill-details/new"]'), null);
     assert.equal(header.querySelector('a[href="/complaints/new"]'), null);
+    assert.equal(header.querySelector('button[aria-label="Go back"]')?.textContent, "Back");
     assert(header.querySelector('button[aria-label="Log out"]'));
   } finally {
     dom.window.close();

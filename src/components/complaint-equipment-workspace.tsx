@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { equipmentLabel } from "@/lib/equipment-label";
+import { money } from "@/lib/format";
 
 type EquipmentOption = {
   id: string;
@@ -39,7 +40,11 @@ type VisitService = {
   inspection: { actualProblem: string } | null;
   workLogs: Array<{ workDone: string }>;
   assignments: Array<{ id: string }>;
-  serviceRecord: { id: string; serviceNumber: string } | null;
+  serviceRecord: {
+    id: string;
+    serviceNumber: string;
+    charges: number | string | { toString(): string };
+  } | null;
 };
 
 export function ComplaintEquipmentWorkspace({
@@ -214,16 +219,17 @@ function VisitServiceList({
   const progress = services.length
     ? Math.round((resolvedCount / services.length) * 100)
     : 0;
+  const visitServiceTotal = services.reduce(
+    (total, service) => total + Number(service.serviceRecord?.charges ?? 0),
+    0,
+  );
 
   return (
     <div id="equipment-services" className="scroll-mt-24">
       <Card className="mt-6 overflow-hidden border-brand-accent/55">
-        <CardHeader
-          title="Service Visit Workspace"
-          subtitle="After inspection, use Add Service Details for each machine to record the actual problem, work performed and amount. Every machine keeps a separate permanent service record."
-        />
+        <CardHeader title="Service Visit Workspace" />
         <div className="border-b border-brand-border bg-brand-faint/50 px-5 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold text-brand-ink">
                 {completedCount} of {services.length} equipment services completed
@@ -234,9 +240,16 @@ function VisitServiceList({
                   : "All machines in this visit are completed"}
               </p>
             </div>
-            <span className="rounded-full bg-white px-3 py-1.5 text-sm font-bold text-brand-primary ring-1 ring-brand-border">
-              {progress}%
-            </span>
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="rounded-xl border border-brand-accent/50 bg-white px-4 py-2 text-right shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-muted">
+                  Visit Service Total
+                </p>
+                <p className="mt-0.5 text-lg font-bold text-brand-primary">
+                  {money(visitServiceTotal)}
+                </p>
+              </div>
+            </div>
           </div>
           <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-brand-subtle">
             <div
@@ -246,13 +259,14 @@ function VisitServiceList({
           </div>
         </div>
         <div className="table-wrap">
-          <table className="table">
+          <table className="table service-visit-table">
             <thead>
               <tr>
-                <th>Complaint</th>
-                <th>Equipment</th>
-                <th>Problem Reported</th>
-                <th>Status</th>
+                <th className="text-center">Complaint</th>
+                <th className="text-center">Equipment</th>
+                <th className="text-center">Problem Reported</th>
+                <th className="text-center">Service Amount</th>
+                <th className="text-center">Status</th>
                 <th className="text-center">Action</th>
               </tr>
             </thead>
@@ -267,64 +281,81 @@ function VisitServiceList({
                 const equipmentName = service.equipment
                   ? equipmentLabel(service.equipment)
                   : "Equipment not linked";
+                const equipmentTableName = service.equipment
+                  ? [service.equipment.name, service.equipment.modelNumber]
+                      .filter(Boolean)
+                      .join(" • ")
+                  : "Equipment not linked";
                 const canCompleteService =
                   canChangeService && service.assignments.length > 0;
                 return (
                   <tr key={service.id}>
-                    <td className="font-semibold text-brand-primary">
+                    <td className="text-center font-semibold text-brand-primary">
                       {service.complaintNumber}
                     </td>
-                    <td className="min-w-56 font-medium text-brand-ink">
-                      {equipmentName}
+                    <td className="min-w-56 text-center font-medium text-brand-ink">
+                      {equipmentTableName}
                     </td>
-                    <td className="min-w-64 max-w-xl whitespace-normal">
+                    <td className="min-w-64 max-w-xl whitespace-normal text-center">
                       {service.customerComplaint}
                     </td>
-                    <td>
-                      <Badge value={service.status} />
+                    <td className="whitespace-nowrap text-center font-semibold text-brand-ink">
+                      {service.serviceRecord
+                        ? money(service.serviceRecord.charges)
+                        : "Pending"}
                     </td>
                     <td className="text-center">
-                      <div className="flex min-w-64 flex-wrap items-center justify-center gap-2">
-                        {service.serviceRecord ? (
-                          <Link
-                            href={`/service-history/${service.serviceRecord.id}`}
-                            className="inline-flex min-h-9 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100"
-                          >
-                            View Service Record
-                          </Link>
-                        ) : canCompleteService && service.equipment ? (
-                          <VisitServiceCompletion
-                            complaintId={service.id}
-                            complaintNumber={service.complaintNumber}
-                            returnComplaintId={currentComplaintId}
-                            equipmentName={equipmentName}
-                            customerComplaint={service.customerComplaint}
-                            actualProblem={service.inspection?.actualProblem ?? ""}
-                            workDone={service.workLogs
-                              .map((log) => log.workDone)
-                              .join("\n")}
-                            pendingCount={pendingCount}
-                          />
-                        ) : (
-                          <span className="text-xs font-medium text-brand-muted">
-                            {!service.equipment
-                              ? "Equipment required"
-                              : canChangeService &&
-                                  service.assignments.length === 0
-                                ? "Assign technician first"
-                                : "Service closed"}
-                          </span>
-                        )}
+                      <Badge
+                        value={service.status}
+                        label={service.serviceRecord ? "Completed" : undefined}
+                      />
+                    </td>
+                    <td className="text-center">
+                      <div className="flex min-w-64 flex-col items-center justify-center gap-2">
+                        <div className="flex justify-center">
+                          {service.serviceRecord ? (
+                            <Link
+                              href={`/service-history/${service.serviceRecord.id}`}
+                              className="inline-flex min-h-9 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100"
+                            >
+                              View Service Record
+                            </Link>
+                          ) : canCompleteService && service.equipment ? (
+                            <VisitServiceCompletion
+                              complaintId={service.id}
+                              complaintNumber={service.complaintNumber}
+                              returnComplaintId={currentComplaintId}
+                              equipmentName={equipmentName}
+                              customerComplaint={service.customerComplaint}
+                              actualProblem={service.inspection?.actualProblem ?? ""}
+                              workDone={service.workLogs
+                                .map((log) => log.workDone)
+                                .join("\n")}
+                              pendingCount={pendingCount}
+                            />
+                          ) : (
+                            <span className="text-xs font-medium text-brand-muted">
+                              {!service.equipment
+                                ? "Equipment required"
+                                : canChangeService &&
+                                    service.assignments.length === 0
+                                  ? "Assign technician first"
+                                  : "Service closed"}
+                            </span>
+                          )}
+                        </div>
                         {canChangeService && service.equipment && (
-                          <VisitServiceActions
-                            complaintId={service.id}
-                            complaintNumber={service.complaintNumber}
-                            returnComplaintId={currentComplaintId}
-                            customerComplaint={service.customerComplaint}
-                            equipment={service.equipment}
-                            brands={brands}
-                            allowDelete={canDelete}
-                          />
+                          <div className="flex flex-wrap items-center justify-center gap-2">
+                            <VisitServiceActions
+                              complaintId={service.id}
+                              complaintNumber={service.complaintNumber}
+                              returnComplaintId={currentComplaintId}
+                              customerComplaint={service.customerComplaint}
+                              equipment={service.equipment}
+                              brands={brands}
+                              allowDelete={canDelete}
+                            />
+                          </div>
                         )}
                       </div>
                     </td>
@@ -360,23 +391,27 @@ function ExternalEquipmentPanel({
   return (
     <details
       open={open}
-      className="group rounded-2xl border border-brand-border bg-white p-4"
+      className="group"
     >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-brand-ink [&::-webkit-details-marker]:hidden">
-        <span>
-          Register External Equipment &amp; Create Service Job
+      <summary className="ml-auto flex min-h-10 w-fit cursor-pointer list-none items-center gap-2 rounded-xl border border-brand-primary bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-primary-hover [&::-webkit-details-marker]:hidden">
+        <span>+ Add Equipment</span>
+        <span
+          aria-hidden="true"
+          className="text-xs transition-transform group-open:rotate-180"
+        >
+          ▼
         </span>
-        <span aria-hidden="true" className="text-lg text-brand-primary transition-transform group-open:rotate-45">+</span>
       </summary>
-      <p className="mt-2 text-xs leading-5 text-brand-muted">
-        Use this when the machine was not purchased from Vellore Fitness Equipment
-        or has never been registered in this software.
-        {" After saving, it appears in the visit list above. Repeat this for each external machine."}
-      </p>
-      <ActionForm
-        action={addComplaintEquipmentServiceFromForm}
-        className="mt-4 grid gap-4 border-t border-brand-border pt-4 md:grid-cols-2 xl:grid-cols-4"
-      >
+      <div className="mt-4 rounded-2xl border border-brand-border bg-white p-4">
+        <p className="text-xs leading-5 text-brand-muted">
+          Use this when the machine was not purchased from Vellore Fitness Equipment
+          or has never been registered in this software.
+          {" After saving, it appears in the visit list above. Repeat this for each external machine."}
+        </p>
+        <ActionForm
+          action={addComplaintEquipmentServiceFromForm}
+          className="mt-4 grid gap-4 border-t border-brand-border pt-4 md:grid-cols-2 xl:grid-cols-4"
+        >
         <input
           type="hidden"
           name="sourceComplaintId"
@@ -426,11 +461,10 @@ function ExternalEquipmentPanel({
           </Field>
         </div>
         <div className="md:col-span-2 xl:col-span-4">
-          <Button type="submit">
-            Register Equipment &amp; Create Service Job
-          </Button>
+          <Button type="submit">Add Equipment Service</Button>
         </div>
-      </ActionForm>
+        </ActionForm>
+      </div>
     </details>
   );
 }

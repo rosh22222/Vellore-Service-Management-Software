@@ -24,6 +24,33 @@ test("complaint list no longer exposes or preserves the status filter", () => {
   assert.match(page, /entry\[0\] !== "status"/);
 });
 
+test("complaint register groups every machine under one service visit", () => {
+  const page = source("src/app/(dashboard)/complaints/page.tsx");
+  assert.match(page, /serviceVisitGroupId \?\? complaint\.id/);
+  assert.doesNotMatch(page, /machines in this visit/);
+  assert.match(page, /isMultiMachineVisit/);
+  assert.match(page, /complaints\.map\(\(complaint, index\)/);
+  assert.match(page, /complaint\.equipment\.modelNumber/);
+  assert.match(page, /label=\{complaint\.serviceRecord \? "Completed" : undefined\}/);
+  assert.doesNotMatch(page, /separate machine problems/);
+  assert.doesNotMatch(page, /<th>Problem<\/th>/);
+  assert.match(page, /service visit\(s\)/);
+  assert.doesNotMatch(page, /<th>Age<\/th>/);
+  assert.doesNotMatch(page, /const age =/);
+});
+
+test("service history groups machine records by service visit", () => {
+  const page = source("src/app/(dashboard)/service-history/page.tsx");
+  assert.match(page, /record\.complaint\.serviceVisitGroupId \?\? record\.complaint\.id/);
+  assert.match(page, /const serviceVisits = pageVisitKeys\.flatMap/);
+  assert.match(page, /serviceVisits\.map\(\(\{ key, records \}\)/);
+  assert.match(page, /const isMultiMachineVisit = records\.length > 1/);
+  assert.match(page, /const serviceItems = records\.map/);
+  assert.match(page, /record\.equipmentNameSnapshot/);
+  assert.doesNotMatch(page, /<th>Problem Found<\/th>/);
+  assert.match(page, /service visit\(s\)/);
+});
+
 test("new complaint supports customer lookup, multiple equipment and multiple technicians", () => {
   const form = source("src/components/complaint-form.tsx");
   const action = source("src/actions/complaint.ts");
@@ -117,6 +144,27 @@ test("service amounts are typed decimal text and cannot change by spinner or whe
   assert.match(serviceAmount, /type="text"/);
   assert.match(serviceAmount, /inputMode="decimal"/);
   assert.doesNotMatch(serviceAmount.slice(0, 700), /type="number"/);
+});
+
+test("service visit workspace totals completed machine service amounts", () => {
+  const workspace = source("src/components/complaint-equipment-workspace.tsx");
+  const complaint = source("src/app/(dashboard)/complaints/[id]/page.tsx");
+  const job = source("src/app/(dashboard)/jobs/[id]/page.tsx");
+  assert.match(complaint, /serviceNumber: true, charges: true/);
+  assert.match(job, /serviceNumber: true, charges: true/);
+  assert.match(workspace, /Visit Service Total/);
+  assert.match(workspace, /visitServiceTotal/);
+  assert.match(workspace, /money\(service\.serviceRecord\.charges\)/);
+  assert.match(workspace, /equipmentTableName/);
+  assert.match(workspace, /label=\{service\.serviceRecord \? "Completed" : undefined\}/);
+  assert.doesNotMatch(workspace, /<th>Complaint<\/th>/);
+  assert.doesNotMatch(workspace, /From \{completedCount\} completed machine/);
+  assert.doesNotMatch(workspace, />\s*\{progress\}%\s*<\/span>/);
+  assert.match(workspace, /flex min-w-64 flex-col items-center justify-center/);
+  assert.match(workspace, /table service-visit-table/);
+  const globals = source("src/app/globals.css");
+  assert.match(globals, /\.table\.service-visit-table th,/);
+  assert.match(globals, /\.table\.service-visit-table td \{/);
 });
 
 test("charts use unique keys when labels repeat", () => {
@@ -214,8 +262,8 @@ test("office and assigned technicians can identify and service several machines 
   assert.doesNotMatch(workspace, />\s*Current\s*</);
   assert.doesNotMatch(workspace, /VisitEquipmentSelector/);
   assert.match(workspace, /showExternalEquipmentRegistration/);
-  assert.match(workspace, /Register External Equipment &amp; Create Service Job/);
-  assert.match(workspace, /Add Service Details for each machine/);
+  assert.match(workspace, /\+ Add Equipment/);
+  assert.doesNotMatch(workspace, /After inspection, use Add Service Details/);
   assert.match(workspace, /Problem on This Equipment/);
   assert.match(identifyBatch, /VisitEquipmentEntryList/);
   assert.match(identifyBatch, /Register &amp; Link Equipment/);

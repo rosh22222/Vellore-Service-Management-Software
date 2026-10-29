@@ -70,8 +70,7 @@ export default async function ServiceHistoryPage({
   }
 
   const [
-    rows,
-    total,
+    matchingRecords,
     technicians,
     customers,
     equipment,
@@ -81,17 +80,15 @@ export default async function ServiceHistoryPage({
     await Promise.all([
       db.serviceRecord.findMany({
         where,
-        include: {
-          customer: true,
-          equipment: true,
-          technician: true,
-          collections: { select: { amount: true } },
+        select: {
+          id: true,
+          serviceDate: true,
+          complaint: {
+            select: { id: true, serviceVisitGroupId: true },
+          },
         },
         orderBy: { serviceDate: "desc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
       }),
-      db.serviceRecord.count({ where }),
       getCachedTechnicianOptions(),
       getCachedCustomerOptions(),
       getCachedEquipmentOptions(),
@@ -105,7 +102,56 @@ export default async function ServiceHistoryPage({
       }),
     ]);
 
+  const visitKeys = [
+    ...new Set(
+      matchingRecords.map(
+        (record) =>
+          record.complaint.serviceVisitGroupId ?? record.complaint.id,
+      ),
+    ),
+  ];
+  const total = visitKeys.length;
   const pages = Math.max(1, Math.ceil(total / pageSize));
+  const pageVisitKeys = visitKeys.slice(
+    (page - 1) * pageSize,
+    page * pageSize,
+  );
+  const rows = pageVisitKeys.length
+    ? await db.serviceRecord.findMany({
+        where: {
+          OR: [
+            { complaintId: { in: pageVisitKeys } },
+            {
+              complaint: {
+                serviceVisitGroupId: { in: pageVisitKeys },
+              },
+            },
+          ],
+        },
+        include: {
+          customer: true,
+          equipment: true,
+          technician: true,
+          collections: { select: { amount: true } },
+          complaint: {
+            select: { id: true, serviceVisitGroupId: true },
+          },
+        },
+        orderBy: [{ serviceDate: "desc" }, { serviceNumber: "asc" }],
+      })
+    : [];
+  const rowsByVisit = new Map<string, typeof rows>();
+  for (const record of rows) {
+    const key =
+      record.complaint.serviceVisitGroupId ?? record.complaint.id;
+    const group = rowsByVisit.get(key) ?? [];
+    group.push(record);
+    rowsByVisit.set(key, group);
+  }
+  const serviceVisits = pageVisitKeys.flatMap((key) => {
+    const records = rowsByVisit.get(key) ?? [];
+    return records.length ? [{ key, records }] : [];
+  });
   const totalCharges = Number(totals._sum.charges ?? 0);
   const totalCollected = Number(collectionTotals._sum.amount ?? 0);
   const totalPending = Math.max(0, totalCharges - totalCollected);
@@ -147,7 +193,7 @@ export default async function ServiceHistoryPage({
       <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-brand-border bg-white p-4">
           <div className="text-xs font-semibold uppercase tracking-wide text-brand-muted">
-            Records Found
+            Service Visits Found
           </div>
           <div className="mt-1 text-2xl font-bold text-brand-ink">{total}</div>
         </div>
@@ -247,7 +293,7 @@ export default async function ServiceHistoryPage({
         </div>
       </form>
 
-      {rows.length ? (
+      {serviceVisits.length ? (
         <Card>
           <div className="table-wrap">
             <table className="table">
@@ -257,7 +303,6 @@ export default async function ServiceHistoryPage({
                   <th>Date</th>
                   <th>Customer / Phone</th>
                   <th>Equipment</th>
-                  <th>Problem Found</th>
                   <th>Technician</th>
                   <th>Warranty</th>
                   <th>Service Amount</th>
@@ -266,54 +311,197 @@ export default async function ServiceHistoryPage({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((record) => {
-                  const collected = record.collections.reduce(
-                    (sum, collection) => sum + Number(collection.amount),
-                    0,
-                  );
-                  const pending = Math.max(0, Number(record.charges) - collected);
+                {serviceVisits.map(({ key, records }) => {
+                  const primary = records[0];
+                  const isMultiMachineVisit = records.length > 1;
+                  const serviceItems = records.map((record) => {
+                    const collected = record.collections.reduce(
+                      (sum, collection) => sum + Number(collection.amount),
+                      0,
+                    );
+                    return {
+                      record,
+                      collected,
+                      pending: Math.max(
+                        0,
+                        Number(record.charges) - collected,
+                      ),
+                    };
+                  });
                   return (
-                    <tr key={record.id}>
-                      <td>
-                        <Link
-                          className="link"
-                          href={`/service-history/${record.id}`}
-                        >
-                          {record.serviceNumber}
-                        </Link>
+                    <tr key={key}>
+                      <td className="min-w-44 align-top">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record }, index) => (
+                            <div
+                              key={record.id}
+                              className="flex min-h-10 items-center gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold text-brand-primary">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <Link
+                                className="link whitespace-nowrap"
+                                href={`/service-history/${record.id}`}
+                              >
+                                {record.serviceNumber}
+                              </Link>
+                            </div>
+                          ))}
+                        </div>
                       </td>
-                      <td>{date(record.serviceDate)}</td>
-                      <td>
+                      <td className="min-w-36 align-top">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record }, index) => (
+                            <div
+                              key={record.id}
+                              className="flex min-h-10 items-center gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold text-brand-primary">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <span className="whitespace-nowrap">
+                                {date(record.serviceDate)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="align-top">
                         <div className="font-semibold">
-                          {record.customerNameSnapshot}
+                          {primary.customerNameSnapshot}
                         </div>
                         <div className="text-xs text-brand-muted">
-                          {record.customerPhoneSnapshot}
+                          {primary.customerPhoneSnapshot}
                         </div>
                       </td>
-                      <td>
-                        {record.equipmentNameSnapshot ?? "Not linked"}
-                        <div className="text-xs text-brand-muted">
-                          {[record.modelSnapshot, record.serialSnapshot]
-                            .filter(Boolean)
-                            .join(" / ")}
+                      <td className="min-w-56 align-top">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record }, index) => (
+                            <div
+                              key={record.id}
+                              className="flex min-h-10 items-start gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold text-brand-primary">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <div>
+                                <div className="font-medium text-brand-ink">
+                                  {[
+                                    record.equipmentNameSnapshot ?? "Not linked",
+                                    record.modelSnapshot,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" • ")}
+                                </div>
+                                {record.serialSnapshot && (
+                                  <div className="mt-0.5 text-xs text-brand-muted">
+                                    Serial: {record.serialSnapshot}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </td>
-                      <td className="max-w-sm">{record.problemFound}</td>
-                      <td>
-                        {record.technicianNameSnapshot ??
-                          record.technician?.name ??
-                          "Unassigned"}
+                      <td className="min-w-48 align-top">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record }, index) => (
+                            <div
+                              key={record.id}
+                              className="flex min-h-10 items-start gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold text-brand-primary">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <span>
+                                {record.technicianNameSnapshot ??
+                                  record.technician?.name ??
+                                  "Unassigned"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </td>
-                      <td>
-                        <Badge value={record.warrantyStatus} />
+                      <td className="min-w-40 align-top">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record }, index) => (
+                            <div
+                              key={record.id}
+                              className="flex min-h-10 items-center gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold text-brand-primary">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <Badge value={record.warrantyStatus} />
+                            </div>
+                          ))}
+                        </div>
                       </td>
-                      <td>{money(record.charges)}</td>
-                      <td className="font-semibold text-emerald-700">
-                        {money(collected)}
+                      <td className="min-w-36 align-top">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record }, index) => (
+                            <div
+                              key={record.id}
+                              className="flex min-h-10 items-center gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold text-brand-primary">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <span>{money(record.charges)}</span>
+                            </div>
+                          ))}
+                        </div>
                       </td>
-                      <td className={pending > 0 ? "font-semibold text-rose-700" : ""}>
-                        {money(pending)}
+                      <td className="min-w-36 align-top font-semibold text-emerald-700">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record, collected }, index) => (
+                            <div
+                              key={record.id}
+                              className="flex min-h-10 items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <span>{money(collected)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="min-w-36 align-top">
+                        <div className="space-y-2">
+                          {serviceItems.map(({ record, pending }, index) => (
+                            <div
+                              key={record.id}
+                              className={`flex min-h-10 items-center gap-2 rounded-lg px-2.5 py-2 ${
+                                pending > 0
+                                  ? "bg-rose-50 font-semibold text-rose-700"
+                                  : "bg-brand-subtle/65"
+                              }`}
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <span>{money(pending)}</span>
+                            </div>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -331,7 +519,7 @@ export default async function ServiceHistoryPage({
 
       <div className="mt-4 flex items-center justify-between text-sm text-brand-muted">
         <span>
-          {total} record(s) - Page {page} of {pages}
+          {total} service visit(s) - Page {page} of {pages}
         </span>
         <div className="flex gap-2">
           {page > 1 && (

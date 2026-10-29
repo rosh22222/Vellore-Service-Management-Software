@@ -25,7 +25,6 @@ type Params = {
   created?: string;
 };
 const pageSize = 25;
-
 export default async function ComplaintsPage({
   searchParams,
 }: {
@@ -83,26 +82,64 @@ export default async function ComplaintsPage({
       where.complaintDate.lte = dateBoundary(params.to, true);
   }
 
-  const [rows, total, technicians] = await Promise.all([
+  const [matchingComplaints, technicians] = await Promise.all([
     db.serviceComplaint.findMany({
       where,
-      include: {
-        customer: true,
-        equipment: true,
-        assignments: {
-          where: { isActive: true },
-          include: { technician: true },
-          orderBy: { assignedAt: "asc" },
-        },
-      },
+      select: { id: true, serviceVisitGroupId: true, complaintDate: true },
       orderBy: { complaintDate: "desc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
     }),
-    db.serviceComplaint.count({ where }),
     getCachedTechnicianOptions(),
   ]);
+  const visitKeys = [
+    ...new Set(
+      matchingComplaints.map(
+        (complaint) => complaint.serviceVisitGroupId ?? complaint.id,
+      ),
+    ),
+  ];
+  const total = visitKeys.length;
   const pages = Math.max(1, Math.ceil(total / pageSize));
+  const pageVisitKeys = visitKeys.slice((page - 1) * pageSize, page * pageSize);
+  const visitRows = pageVisitKeys.length
+    ? await db.serviceComplaint.findMany({
+        where: {
+          OR: [
+            { id: { in: pageVisitKeys } },
+            { serviceVisitGroupId: { in: pageVisitKeys } },
+          ],
+        },
+        include: {
+          customer: true,
+          equipment: true,
+          serviceRecord: { select: { id: true } },
+          assignments: {
+            where: {
+              OR: [
+                { isActive: true },
+                { endedReason: "Service completed" },
+              ],
+            },
+            include: { technician: true },
+            orderBy: { assignedAt: "asc" },
+          },
+        },
+        orderBy: [{ complaintDate: "desc" }, { complaintNumber: "asc" }],
+      })
+    : [];
+  const rowsByVisit = new Map<string, typeof visitRows>();
+  for (const complaint of visitRows) {
+    const key = complaint.serviceVisitGroupId ?? complaint.id;
+    const group = rowsByVisit.get(key) ?? [];
+    group.push(complaint);
+    rowsByVisit.set(key, group);
+  }
+  const serviceVisits = pageVisitKeys.flatMap((key) => {
+    const complaints = rowsByVisit.get(key) ?? [];
+    if (!complaints.length) return [];
+    const primary =
+      complaints.find((complaint) => complaint.id === key) ?? complaints[0];
+    return [{ key, primary, complaints }];
+  });
   const preservedSearchFields = Object.fromEntries(
     Object.entries(params).filter(
       (entry): entry is [string, string] =>
@@ -146,7 +183,7 @@ export default async function ComplaintsPage({
       />
       {Number(params.created) > 1 && (
         <AutoDismissNotice className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-800 shadow-sm">
-          {params.created} equipment complaints were registered successfully.
+          {params.created} equipment services were added to one service visit.
         </AutoDismissNotice>
       )}
       <SearchForm
@@ -218,74 +255,107 @@ export default async function ComplaintsPage({
           </Link>
         </div>
       </form>
-      {rows.length ? (
+      {serviceVisits.length ? (
         <Card>
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Complaint #</th>
+                  <th>Service Visit #</th>
                   <th>Date</th>
                   <th>Customer / Phone</th>
                   <th>Equipment</th>
-                  <th>Problem</th>
                   <th>Technician</th>
                   <th>Priority</th>
                   <th>Status</th>
-                  <th>Age</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((complaint) => {
-                  const age = Math.max(
-                    0,
-                    Math.floor(
-                      (Date.now() - complaint.complaintDate.getTime()) /
-                        86400000,
+                {serviceVisits.map(({ key, primary, complaints }) => {
+                  const technicianNames = [
+                    ...new Set(
+                      complaints.flatMap((complaint) =>
+                        complaint.assignments.map(
+                          (assignment) => assignment.technician.name,
+                        ),
+                      ),
                     ),
-                  );
+                  ];
+                  const isMultiMachineVisit = complaints.length > 1;
                   return (
-                    <tr key={complaint.id}>
+                    <tr key={key}>
                       <td>
                         <Link
                           className="link"
-                          href={`/complaints/${complaint.id}`}
+                          href={`/complaints/${primary.id}`}
                         >
-                          {complaint.complaintNumber}
+                          {primary.complaintNumber}
                         </Link>
                       </td>
-                      <td>{date(complaint.complaintDate)}</td>
+                      <td>{date(primary.complaintDate)}</td>
                       <td>
                         <div className="font-semibold">
-                          {complaint.customer.name}
+                          {primary.customer.name}
                         </div>
                         <div className="text-xs text-brand-muted">
-                          {complaint.customer.primaryMobile}
+                          {primary.customer.primaryMobile}
+                        </div>
+                      </td>
+                      <td className="min-w-56 align-top">
+                        <div className="space-y-2">
+                          {complaints.map((complaint, index) => {
+                            const equipmentName = complaint.equipment
+                              ? [
+                                  complaint.equipment.name,
+                                  complaint.equipment.modelNumber,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" • ")
+                              : "Equipment not identified";
+                            return (
+                              <div
+                                key={complaint.id}
+                                className="flex items-start gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2 font-medium text-brand-ink"
+                              >
+                                {isMultiMachineVisit && (
+                                  <span className="shrink-0 font-bold text-brand-primary">
+                                    {index + 1}.
+                                  </span>
+                                )}
+                                <span className="break-words">{equipmentName}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </td>
                       <td>
-                        {complaint.equipment?.name ?? "—"}
-                        <div className="text-xs text-brand-muted">
-                          {complaint.equipment?.modelNumber ?? ""}
-                        </div>
-                      </td>
-                      <td className="max-w-sm">
-                        {complaint.customerComplaint}
-                      </td>
-                      <td>
-                        {complaint.assignments.length
-                          ? complaint.assignments
-                              .map((assignment) => assignment.technician.name)
-                              .join(", ")
+                        {technicianNames.length
+                          ? technicianNames.join(", ")
                           : "Unassigned"}
                       </td>
                       <td>
-                        <Badge value={complaint.priority} />
+                        <Badge value={primary.priority} />
                       </td>
-                      <td>
-                        <Badge value={complaint.status} />
+                      <td className="min-w-48 align-top">
+                        <div className="space-y-2">
+                          {complaints.map((complaint, index) => (
+                            <div
+                              key={complaint.id}
+                              className="flex min-h-9 items-center gap-2 rounded-lg bg-brand-subtle/65 px-2.5 py-2"
+                            >
+                              {isMultiMachineVisit && (
+                                <span className="shrink-0 font-bold text-brand-primary">
+                                  {index + 1}.
+                                </span>
+                              )}
+                              <Badge
+                                value={complaint.status}
+                                label={complaint.serviceRecord ? "Completed" : undefined}
+                              />
+                            </div>
+                          ))}
+                        </div>
                       </td>
-                      <td>{age}d</td>
                     </tr>
                   );
                 })}
@@ -301,7 +371,7 @@ export default async function ComplaintsPage({
       )}
       <div className="mt-4 flex items-center justify-between text-sm text-brand-muted">
         <span>
-          {total} complaint(s) • Page {page} of {pages}
+          {total} service visit(s) • Page {page} of {pages}
         </span>
         <div className="flex gap-2">
           {page > 1 && (

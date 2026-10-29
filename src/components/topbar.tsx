@@ -3,6 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { CalendarDays, FilePlus2, Wrench } from "lucide-react";
 import { TopbarLogoutButton } from "@/components/topbar-logout-button";
+import { TopbarBackButton } from "@/components/topbar-back-button";
 import { getBrandAssetSrc } from "@/lib/brand-assets";
 
 export function Topbar({ user }: { user: Session["user"] }) {
@@ -19,6 +20,7 @@ export function Topbar({ user }: { user: Session["user"] }) {
   return (
     <header className="sticky top-0 z-20 flex min-h-20 flex-wrap items-center gap-3 border-b border-brand-border bg-white/95 px-4 py-3 backdrop-blur-md sm:flex-nowrap md:px-6 xl:px-8">
       <div className="flex min-w-0 flex-1 items-center gap-3">
+        <TopbarBackButton />
         <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-brand-soft text-lg font-semibold text-brand-primary ring-2 ring-brand-accent/70">
           {avatarSrc ? (
             <Image

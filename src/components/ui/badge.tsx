@@ -37,12 +37,18 @@ const labelMap: Record<string, string> = {
   UNKNOWN: "No Warranty",
 };
 
-export function Badge({ value }: { value: string }) {
+export function Badge({
+  value,
+  label,
+}: {
+  value: string;
+  label?: string;
+}) {
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium leading-4 ring-1 ring-inset ${map[value] ?? "bg-brand-cool/10 text-brand-secondary ring-brand-border"}`}
     >
-      {labelMap[value] ?? titleCase(value)}
+      {label ?? labelMap[value] ?? titleCase(value)}
     </span>
   );
 }
